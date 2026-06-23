@@ -17,15 +17,17 @@ btnTest.addEventListener('click', async () => {
   btnTest.disabled = true
   btnConfirm.disabled = true
   try {
-    // Send a minimal SDP POST to check if the WHEP endpoint is reachable.
-    // A 200/201 means success; 400 means server reached but bad SDP (still reachable).
-    // A 404 also means the server answered; the path/stream may be missing, but the connection target is reachable.
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/sdp' },
-      body: 'v=0\r\n',
-    })
-    if ([200, 201, 400, 404].includes(resp.status)) {
+    const probeUrl = window.setupProbe.getSrsApiUrlFromWhepUrl(url)
+    if (!probeUrl) {
+      setStatus('✗ 地址格式无效', 'err')
+      btnConfirm.disabled = true
+      btnTest.disabled = false
+      return
+    }
+
+    // Check the SRS HTTP API instead of sending a fake SDP offer to WHEP.
+    const resp = await fetch(probeUrl, { method: 'GET' })
+    if (resp.ok) {
       if (urlInput.value.trim() !== url) {
         setStatus('输入已更改，请重新测试', 'err')
         verifiedUrl = ''

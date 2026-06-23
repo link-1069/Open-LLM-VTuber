@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -92,7 +92,7 @@ Interruption: the asyncio Task is cancelled; `agent.handle_interrupt(heard_respo
 
 `ServiceContext` initializes MCP components via `_init_mcp_components()`. Components:
 - `ServerRegistry` — knows which servers are configured
-- `ToolAdapter` — fetches tool schemas from servers and formats them for OpenAI/Claude tool-use APIs
+- `ToolAdapter` — fetches tool schemas from servers and formats them for OpenAI/Codex tool-use APIs
 - `ToolManager` — holds the formatted tool lists and raw tool dict
 - `MCPClient` — executes tool calls against the MCP servers
 - `ToolExecutor` — orchestrates MCPClient + ToolManager for BasicMemoryAgent
