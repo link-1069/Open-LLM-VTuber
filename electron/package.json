@@ -1,0 +1,44 @@
+{
+  "name": "open-llm-vtuber-desktop",
+  "version": "1.0.0",
+  "description": "Open-LLM-VTuber desktop pet",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.open-llm-vtuber.desktop",
+    "productName": "Open-LLM-VTuber",
+    "directories": { "output": "dist" },
+    "win": {
+      "target": "nsis",
+      "icon": "../assets/icon.ico"
+    },
+    "files": [
+      "**/*",
+      "!node_modules",
+      "!dist"
+    ],
+    "extraResources": [
+      {
+        "from": "../",
+        "to": "app",
+        "filter": [
+          "src/**",
+          "run_server.py",
+          "conf.yaml",
+          "config_templates/**",
+          "characters/**",
+          "prompts/**",
+          "pyproject.toml",
+          "uv.lock"
+        ]
+      }
+    ]
+  }
+}
