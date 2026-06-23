@@ -6,10 +6,8 @@ from datetime import datetime
 from typing import List, Optional, Dict
 from loguru import logger
 
-from ..agent.output_types import DisplayText, Actions
-from ..live2d_model import Live2dModel
+from ..agent.output_types import DisplayText
 from ..tts.tts_interface import TTSInterface
-from ..utils.stream_audio import prepare_audio_payload
 from .types import WebSocketSend
 
 
@@ -31,8 +29,6 @@ class TTSTaskManager:
         self,
         tts_text: str,
         display_text: DisplayText,
-        actions: Optional[Actions],
-        live2d_model: Live2dModel,
         tts_engine: TTSInterface,
         websocket_send: WebSocketSend,
     ) -> None:
@@ -42,47 +38,36 @@ class TTSTaskManager:
         Args:
             tts_text: Text to synthesize
             display_text: Text to display in UI
-            actions: Live2D model actions
-            live2d_model: Live2D model instance
             tts_engine: TTS engine instance
             websocket_send: WebSocket send function
         """
         if len(re.sub(r'[\s.,!?，。！？\'"』」）】\s]+', "", tts_text)) == 0:
             logger.debug("Empty TTS text, sending silent display payload")
-            # Get current sequence number for silent payload
             current_sequence = self._sequence_counter
             self._sequence_counter += 1
 
-            # Start sender task if not running
             if not self._sender_task or self._sender_task.done():
                 self._sender_task = asyncio.create_task(
                     self._process_payload_queue(websocket_send)
                 )
 
-            await self._send_silent_payload(display_text, actions, current_sequence)
+            await self._send_silent_payload(display_text, current_sequence)
             return
 
-        logger.debug(
-            f"🏃Queuing TTS task for: '''{tts_text}''' (by {display_text.name})"
-        )
+        logger.debug(f"🏃Queuing TTS task for: '''{tts_text}''' (by {display_text.name})")
 
-        # Get current sequence number
         current_sequence = self._sequence_counter
         self._sequence_counter += 1
 
-        # Start sender task if not running
         if not self._sender_task or self._sender_task.done():
             self._sender_task = asyncio.create_task(
                 self._process_payload_queue(websocket_send)
             )
 
-        # Create and queue the TTS task
         task = asyncio.create_task(
             self._process_tts(
                 tts_text=tts_text,
                 display_text=display_text,
-                actions=actions,
-                live2d_model=live2d_model,
                 tts_engine=tts_engine,
                 sequence_number=current_sequence,
             )
@@ -116,46 +101,38 @@ class TTSTaskManager:
     async def _send_silent_payload(
         self,
         display_text: DisplayText,
-        actions: Optional[Actions],
         sequence_number: int,
     ) -> None:
-        """Queue a silent audio payload"""
-        audio_payload = prepare_audio_payload(
-            audio_path=None,
-            display_text=display_text,
-            actions=actions,
-        )
-        await self._payload_queue.put((audio_payload, sequence_number))
+        """Queue a display-text payload (no audio)"""
+        payload = {
+            "type": "display-text",
+            "display_text": display_text.to_dict() if display_text else None,
+        }
+        await self._payload_queue.put((payload, sequence_number))
 
     async def _process_tts(
         self,
         tts_text: str,
         display_text: DisplayText,
-        actions: Optional[Actions],
-        live2d_model: Live2dModel,
         tts_engine: TTSInterface,
         sequence_number: int,
     ) -> None:
-        """Process TTS generation and queue the result for ordered delivery"""
+        """Generate TTS audio (for inference model) and queue display-text payload."""
         audio_file_path = None
         try:
             audio_file_path = await self._generate_audio(tts_engine, tts_text)
-            payload = prepare_audio_payload(
-                audio_path=audio_file_path,
-                display_text=display_text,
-                actions=actions,
-            )
-            # Queue the payload with its sequence number
+            payload = {
+                "type": "display-text",
+                "display_text": display_text.to_dict() if display_text else None,
+            }
             await self._payload_queue.put((payload, sequence_number))
 
         except Exception as e:
-            logger.error(f"Error preparing audio payload: {e}")
-            # Queue silent payload for error case
-            payload = prepare_audio_payload(
-                audio_path=None,
-                display_text=display_text,
-                actions=actions,
-            )
+            logger.error(f"Error preparing display-text payload: {e}")
+            payload = {
+                "type": "display-text",
+                "display_text": display_text.to_dict() if display_text else None,
+            }
             await self._payload_queue.put((payload, sequence_number))
 
         finally:
