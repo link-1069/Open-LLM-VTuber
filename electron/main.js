@@ -1,15 +1,18 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
 const fs = require('fs')
-const { spawn } = require('child_process')
+const { spawn, spawnSync } = require('child_process')
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json')
-const PROJECT_ROOT = path.join(__dirname, '..')
 const SERVER_PORT = 12393
 
 let mainWindow = null
 let setupWindow = null
 let pythonProcess = null
+
+function getProjectRoot() {
+  return app.isPackaged ? path.join(process.resourcesPath, 'app') : path.join(__dirname, '..')
+}
 
 function readConfig() {
   try {
@@ -27,6 +30,7 @@ function normalizeConfig(cfg) {
 }
 
 function writeConfig(cfg) {
+  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true })
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(normalizeConfig(cfg), null, 2), 'utf8')
 }
 
@@ -38,43 +42,97 @@ function handlePythonOutput(data, log, prefix, markReady) {
   }
 }
 
+function stopPythonProcess() {
+  if (!pythonProcess) {
+    return
+  }
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(pythonProcess.pid), '/t', '/f'], { shell: true })
+  } else {
+    pythonProcess.kill()
+  }
+  pythonProcess = null
+}
+
 function spawnPython() {
+  const projectRoot = getProjectRoot()
   pythonProcess = spawn('uv', ['run', 'run_server.py'], {
-    cwd: PROJECT_ROOT,
+    cwd: projectRoot,
     shell: true,
   })
   return new Promise((resolve, reject) => {
     let settled = false
+    let ready = false
     let timeout = null
+    function cleanup() {
+      if (pythonProcess) {
+        pythonProcess.removeListener('error', onError)
+        pythonProcess.removeListener('exit', onExit)
+        pythonProcess.removeListener('close', onClose)
+        pythonProcess.stdout.removeListener('data', onStdout)
+        pythonProcess.stderr.removeListener('data', onStderr)
+      }
+    }
     function finish() {
       if (settled) return
       settled = true
       clearTimeout(timeout)
+      cleanup()
       resolve()
     }
     function fail(err) {
       if (settled) return
       settled = true
       clearTimeout(timeout)
+      stopPythonProcess()
       reject(err)
+    }
+    function onStdout(data) {
+      handlePythonOutput(data, console.log, '[Python]', () => {
+        ready = true
+        finish()
+      })
+    }
+    function onStderr(data) {
+      handlePythonOutput(data, console.error, '[Python stderr]', () => {
+        ready = true
+        finish()
+      })
+    }
+    function onError(err) {
+      fail(err)
+    }
+    function onExit(code, signal) {
+      if (!settled && !ready) {
+        fail(new Error(`Python server exited before startup complete (code=${code}, signal=${signal})`))
+      }
+    }
+    function onClose(code, signal) {
+      if (!settled && !ready) {
+        fail(new Error(`Python server closed before startup complete (code=${code}, signal=${signal})`))
+      }
     }
     timeout = setTimeout(
       () => fail(new Error('Python server startup timeout (30s)')),
       30000
     )
-    pythonProcess.stdout.on('data', (data) => {
-      handlePythonOutput(data, console.log, '[Python]', finish)
-    })
-    pythonProcess.stderr.on('data', (data) => {
-      handlePythonOutput(data, console.error, '[Python stderr]', finish)
-    })
-    pythonProcess.on('error', (err) => {
-      fail(err)
-    })
+    pythonProcess.stdout.on('data', onStdout)
+    pythonProcess.stderr.on('data', onStderr)
+    pythonProcess.on('error', onError)
+    pythonProcess.on('exit', onExit)
+    pythonProcess.on('close', onClose)
   })
 }
 
 function createMainWindow() {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore()
+    }
+    mainWindow.show()
+    mainWindow.focus()
+    return
+  }
   mainWindow = new BrowserWindow({
     width: 480,
     height: 800,
@@ -110,7 +168,7 @@ function createSetupWindow() {
 }
 
 app.whenReady().then(async () => {
-  ipcMain.handle('get-config', () => readConfig())
+  ipcMain.handle('get-config', () => normalizeConfig(readConfig()))
   ipcMain.handle('save-config', (_, cfg) => { writeConfig(cfg); return true })
   ipcMain.handle('get-ws-url', () => `ws://localhost:${SERVER_PORT}/client-ws`)
   ipcMain.handle('open-main-window', () => {
@@ -135,10 +193,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
-  if (pythonProcess) {
-    pythonProcess.kill()
-    pythonProcess = null
-  }
+  stopPythonProcess()
 })
 
 app.on('window-all-closed', () => {
