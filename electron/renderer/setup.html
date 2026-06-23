@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>配置数字人连接</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="setup-body">
+  <div class="setup-container">
+    <h2>配置数字人连接</h2>
+    <p class="hint">输入 SRS WHEP 拉流地址，后续启动将自动连接</p>
+    <input
+      type="text"
+      id="whep-url"
+      placeholder="http://localhost:1985/rtc/v1/whep/?app=live&stream=avatar"
+    />
+    <div class="btn-row">
+      <button id="btn-test">连接测试</button>
+      <button id="btn-confirm" disabled>确认保存</button>
+    </div>
+    <p id="status"></p>
+  </div>
+  <script src="setup.js"></script>
+</body>
+</html>
