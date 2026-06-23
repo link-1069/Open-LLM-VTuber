@@ -14,7 +14,7 @@
       -webkit-app-region: drag;
     }
 
-    #canvas {
+    #stage {
       position: absolute;
       top: 0; left: 0;
       width: 100%; height: 100%;
@@ -39,17 +39,21 @@
     }
 
     #video {
-      /* Hidden source for WebGL — audio plays from here */
+      /* Hidden source for Three.js VideoTexture; audio plays from here. */
       display: none;
     }
   </style>
 </head>
 <body>
-  <canvas id="canvas"></canvas>
+  <div id="stage"></div>
   <video id="video" autoplay playsinline></video>
   <div id="subtitle"></div>
 
+  <script src="vendor/three.min.js"></script>
   <script src="srs.sdk.js"></script>
+  <script src="chroma_key_material.js"></script>
+  <script src="three_stage.js"></script>
+  <script src="srs_stream.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

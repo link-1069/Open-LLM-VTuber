@@ -9,12 +9,15 @@
   },
   "devDependencies": {
     "electron": "^31.0.0",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "playwright": "^1.61.0"
   },
   "build": {
     "appId": "com.open-llm-vtuber.desktop",
     "productName": "Open-LLM-VTuber",
-    "directories": { "output": "dist" },
+    "directories": {
+      "output": "dist"
+    },
     "win": {
       "target": "nsis"
     },
@@ -43,5 +46,8 @@
         ]
       }
     ]
+  },
+  "dependencies": {
+    "three": "^0.142.0"
   }
 }

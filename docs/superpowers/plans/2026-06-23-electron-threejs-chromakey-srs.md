@@ -128,7 +128,7 @@ Expected: PASS.
 Load scripts in this order:
 
 ```html
-<script src="../node_modules/three/build/three.min.js"></script>
+<script src="vendor/three.min.js"></script>
 <script src="srs.sdk.js"></script>
 <script src="chroma_key_material.js"></script>
 <script src="three_stage.js"></script>
