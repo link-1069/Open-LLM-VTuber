@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, Menu } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { spawn, spawnSync } = require('child_process')
@@ -174,11 +174,33 @@ function createMainWindow() {
       nodeIntegration: false,
     },
   })
+  mainWindow.webContents.on('context-menu', () => {
+    const menu = Menu.buildFromTemplate([
+      {
+        label: '设置投流地址',
+        click: () => {
+          createSetupWindow()
+          if (mainWindow) {
+            mainWindow.close()
+          }
+        },
+      },
+    ])
+    menu.popup({ window: mainWindow })
+  })
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'main.html'))
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
 function createSetupWindow() {
+  if (setupWindow) {
+    if (setupWindow.isMinimized()) {
+      setupWindow.restore()
+    }
+    setupWindow.show()
+    setupWindow.focus()
+    return
+  }
   setupWindow = new BrowserWindow({
     width: 520,
     height: 240,

@@ -55,6 +55,47 @@
       }, retryDelayMs)
     }
 
+    function handleStreamDisconnected(whepUrl, activeAttemptId, reason) {
+      if (activeAttemptId !== attemptId || currentWhepUrl !== whepUrl) {
+        return
+      }
+      logger.warn('SRS stream disconnected:', reason)
+      closeSdk()
+      scheduleRetry(whepUrl, activeAttemptId)
+    }
+
+    function attachDisconnectHandlers(activeSdk, whepUrl, activeAttemptId) {
+      const pc = activeSdk && activeSdk.pc
+      const retryStates = ['failed', 'disconnected', 'closed']
+      const onConnectionStateChange = function () {
+        if (!pc) {
+          return
+        }
+        if (retryStates.includes(pc.connectionState) || retryStates.includes(pc.iceConnectionState)) {
+          handleStreamDisconnected(whepUrl, activeAttemptId, `pc=${pc.connectionState || 'unknown'}, ice=${pc.iceConnectionState || 'unknown'}`)
+        }
+      }
+
+      if (pc) {
+        pc.onconnectionstatechange = onConnectionStateChange
+        pc.oniceconnectionstatechange = onConnectionStateChange
+      }
+
+      if (!activeSdk.stream || typeof activeSdk.stream.getTracks !== 'function') {
+        return
+      }
+      activeSdk.stream.getTracks().forEach(function (track) {
+        const onEnded = function () {
+          handleStreamDisconnected(whepUrl, activeAttemptId, 'track ended')
+        }
+        if (typeof track.addEventListener === 'function') {
+          track.addEventListener('ended', onEnded, { once: true })
+        } else {
+          track.onended = onEnded
+        }
+      })
+    }
+
     async function start(whepUrl, forceRestart = false) {
       if (!whepUrl) {
         return
@@ -68,16 +109,28 @@
       const thisAttemptId = ++attemptId
       closeSdk()
 
-      const SrsRtcWhipWhepAsync = getSdkCtor()
-      if (typeof SrsRtcWhipWhepAsync !== 'function') {
-        showStatus('SRS SDK is not available')
+      try {
+        const SrsRtcWhipWhepAsync = getSdkCtor()
+        if (typeof SrsRtcWhipWhepAsync !== 'function') {
+          showStatus('SRS SDK is not available')
+          scheduleRetry(whepUrl, thisAttemptId)
+          return
+        }
+
+        sdk = new SrsRtcWhipWhepAsync()
+        attachDisconnectHandlers(sdk, whepUrl, thisAttemptId)
+        if (video) {
+          video.srcObject = sdk.stream
+        }
+      } catch (error) {
+        if (thisAttemptId !== attemptId) {
+          return
+        }
+        logger.error('SRS stream initialization failed:', error)
+        showStatus('SRS stream initialization failed')
+        closeSdk()
         scheduleRetry(whepUrl, thisAttemptId)
         return
-      }
-
-      sdk = new SrsRtcWhipWhepAsync()
-      if (video) {
-        video.srcObject = sdk.stream
       }
 
       try {

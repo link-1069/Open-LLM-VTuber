@@ -4,6 +4,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const htmlPath = path.join(__dirname, 'main.html')
+const mainProcessPath = path.join(__dirname, '..', 'main.js')
+const setupScriptPath = path.join(__dirname, 'setup.js')
 
 function getScriptSources(html) {
   const matches = html.matchAll(/<script\s+src="([^"]+)"><\/script>/g)
@@ -29,4 +31,35 @@ test('ships the local Three.js browser build used by the main window', () => {
   const vendorPath = path.join(__dirname, 'vendor', 'three.min.js')
   assert.equal(fs.existsSync(vendorPath), true)
   assert.ok(fs.statSync(vendorPath).size > 100000)
+})
+
+test('main window context menu can return to stream setup', () => {
+  const script = fs.readFileSync(mainProcessPath, 'utf8')
+  const menuItemIndex = script.indexOf("label: '设置投流地址'")
+  const openSetupIndex = script.indexOf('createSetupWindow()', menuItemIndex)
+  const closeMainIndex = script.indexOf('mainWindow.close()', menuItemIndex)
+
+  assert.match(script, /const \{ app, BrowserWindow, ipcMain, Menu \} = require\('electron'\)/)
+  assert.match(script, /mainWindow\.webContents\.on\('context-menu'/)
+  assert.notEqual(menuItemIndex, -1)
+  assert.notEqual(openSetupIndex, -1)
+  assert.notEqual(closeMainIndex, -1)
+  assert.ok(openSetupIndex < closeMainIndex)
+})
+
+test('setup window creation reuses an existing setup window', () => {
+  const script = fs.readFileSync(mainProcessPath, 'utf8')
+
+  assert.match(script, /if \(setupWindow\) \{[\s\S]*setupWindow\.show\(\)[\s\S]*setupWindow\.focus\(\)[\s\S]*return[\s\S]*\}/)
+})
+
+test('setup page prefills the saved WHEP URL', () => {
+  const script = fs.readFileSync(setupScriptPath, 'utf8')
+  const getConfigIndex = script.indexOf('window.electronAPI.getConfig()')
+  const prefillIndex = script.indexOf('urlInput.value = config.whep_url', getConfigIndex)
+  const disableConfirmIndex = script.indexOf('btnConfirm.disabled = true', prefillIndex)
+
+  assert.notEqual(getConfigIndex, -1)
+  assert.notEqual(prefillIndex, -1)
+  assert.notEqual(disableConfirmIndex, -1)
 })

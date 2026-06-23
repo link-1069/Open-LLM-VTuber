@@ -57,8 +57,19 @@ function scheduleWsReconnect() {
   }
   wsReconnectTimer = setTimeout(() => {
     wsReconnectTimer = null
-    connectWs()
+    connectWs().catch(handleConnectWsError)
   }, 3000)
+}
+
+function handleConnectWsError(error) {
+  console.error('WebSocket setup failed:', error)
+  showSubtitle(`WebSocket setup failed: ${error.message}`)
+  scheduleWsReconnect()
+}
+
+function handleStreamStartupError(error) {
+  console.error('SRS stream startup failed:', error)
+  showSubtitle(`SRS stream startup failed: ${error.message}`)
 }
 
 async function startConfiguredStream(config, previousWhepUrl) {
@@ -83,7 +94,7 @@ async function connectWs() {
   const previousWhepUrl = cachedConfig?.whep_url
   cachedConfig = config
 
-  startConfiguredStream(config, previousWhepUrl)
+  startConfiguredStream(config, previousWhepUrl).catch(handleStreamStartupError)
 
   ws = new WebSocket(wsUrl)
   const socket = ws
@@ -151,4 +162,4 @@ window.addEventListener('beforeunload', () => {
 
 initThreeStage()
 initStreamController()
-connectWs()
+connectWs().catch(handleConnectWsError)

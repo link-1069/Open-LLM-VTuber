@@ -5,6 +5,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node --test ./renderer/chroma_key_material.test.js ./renderer/srs_stream.test.js ./renderer/three_stage.test.js ./renderer/main_window_scripts.test.js ./renderer/setup_probe.test.js",
+    "test:e2e": "node --test ./electron_smoke.test.js",
     "build": "electron-builder --win --x64"
   },
   "devDependencies": {

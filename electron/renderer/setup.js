@@ -9,6 +9,19 @@ function setStatus(msg, type) {
   statusEl.className = type || ''
 }
 
+async function prefillSavedConfig() {
+  try {
+    const config = await window.electronAPI.getConfig()
+    if (config?.whep_url) {
+      urlInput.value = config.whep_url
+      verifiedUrl = ''
+      btnConfirm.disabled = true
+    }
+  } catch (e) {
+    setStatus(`读取配置失败: ${e.message}`, 'err')
+  }
+}
+
 btnTest.addEventListener('click', async () => {
   const url = urlInput.value.trim()
   if (!url) { setStatus('请输入地址', 'err'); return }
@@ -77,3 +90,5 @@ urlInput.addEventListener('input', () => {
   verifiedUrl = ''
   btnConfirm.disabled = true
 })
+
+prefillSavedConfig()
