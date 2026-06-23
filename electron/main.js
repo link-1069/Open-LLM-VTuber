@@ -19,8 +19,23 @@ function readConfig() {
   }
 }
 
+function normalizeConfig(cfg) {
+  return {
+    whep_url: typeof cfg?.whep_url === 'string' ? cfg.whep_url : '',
+    last_updated: typeof cfg?.last_updated === 'string' ? cfg.last_updated : new Date().toISOString(),
+  }
+}
+
 function writeConfig(cfg) {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf8')
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(normalizeConfig(cfg), null, 2), 'utf8')
+}
+
+function handlePythonOutput(data, log, prefix, markReady) {
+  const text = data.toString()
+  log(prefix, text.trimEnd())
+  if (text.includes('Application startup complete')) {
+    markReady()
+  }
 }
 
 function spawnPython() {
@@ -29,24 +44,32 @@ function spawnPython() {
     shell: true,
   })
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error('Python server startup timeout (30s)')),
+    let settled = false
+    let timeout = null
+    function finish() {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      resolve()
+    }
+    function fail(err) {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      reject(err)
+    }
+    timeout = setTimeout(
+      () => fail(new Error('Python server startup timeout (30s)')),
       30000
     )
     pythonProcess.stdout.on('data', (data) => {
-      const text = data.toString()
-      console.log('[Python]', text.trimEnd())
-      if (text.includes('Application startup complete')) {
-        clearTimeout(timeout)
-        resolve()
-      }
+      handlePythonOutput(data, console.log, '[Python]', finish)
     })
     pythonProcess.stderr.on('data', (data) => {
-      console.error('[Python stderr]', data.toString().trimEnd())
+      handlePythonOutput(data, console.error, '[Python stderr]', finish)
     })
     pythonProcess.on('error', (err) => {
-      clearTimeout(timeout)
-      reject(err)
+      fail(err)
     })
   })
 }
@@ -100,7 +123,7 @@ app.whenReady().then(async () => {
     console.log('Python server ready.')
   } catch (e) {
     console.error('Python server failed to start:', e.message)
-    // Continue anyway 鈥?user may have server running separately
+    // Continue anyway - user may have server running separately
   }
 
   const cfg = readConfig()
