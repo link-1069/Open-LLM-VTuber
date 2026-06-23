@@ -5,7 +5,6 @@ from loguru import logger
 from fastapi import WebSocket
 
 from prompts import prompt_loader
-from .live2d_model import Live2dModel
 from .asr.asr_interface import ASRInterface
 from .tts.tts_interface import TTSInterface
 from .vad.vad_interface import VADInterface
@@ -47,7 +46,6 @@ class ServiceContext:
         self.system_config: SystemConfig = None
         self.character_config: CharacterConfig = None
 
-        self.live2d_model: Live2dModel = None
         self.asr_engine: ASRInterface = None
         self.tts_engine: TTSInterface = None
         self.agent_engine: AgentInterface = None
@@ -77,7 +75,6 @@ class ServiceContext:
             f"ServiceContext:\n"
             f"  System Config: {'Loaded' if self.system_config else 'Not Loaded'}\n"
             f"    Details: {json.dumps(self.system_config.model_dump(), indent=6) if self.system_config else 'None'}\n"
-            f"  Live2D Model: {self.live2d_model.model_info if self.live2d_model else 'Not Loaded'}\n"
             f"  ASR Engine: {type(self.asr_engine).__name__ if self.asr_engine else 'Not Loaded'}\n"
             f"    Config: {json.dumps(self.character_config.asr_config.model_dump(), indent=6) if self.character_config.asr_config else 'None'}\n"
             f"  TTS Engine: {type(self.tts_engine).__name__ if self.tts_engine else 'Not Loaded'}\n"
@@ -203,7 +200,6 @@ class ServiceContext:
         config: Config,
         system_config: SystemConfig,
         character_config: CharacterConfig,
-        live2d_model: Live2dModel,
         asr_engine: ASRInterface,
         tts_engine: TTSInterface,
         vad_engine: VADInterface,
@@ -226,7 +222,6 @@ class ServiceContext:
         self.config = config
         self.system_config = system_config
         self.character_config = character_config
-        self.live2d_model = live2d_model
         self.asr_engine = asr_engine
         self.tts_engine = tts_engine
         self.vad_engine = vad_engine
@@ -264,9 +259,6 @@ class ServiceContext:
             self.character_config = config.character_config
 
         # update all sub-configs
-
-        # init live2d from character config
-        self.init_live2d(config.character_config.live2d_model_name)
 
         # init asr from character config
         self.init_asr(config.character_config.asr_config)
@@ -310,15 +302,6 @@ class ServiceContext:
         self.config = config
         self.system_config = config.system_config or self.system_config
         self.character_config = config.character_config
-
-    def init_live2d(self, live2d_model_name: str) -> None:
-        logger.info(f"Initializing Live2D: {live2d_model_name}")
-        try:
-            self.live2d_model = Live2dModel(live2d_model_name)
-            self.character_config.live2d_model_name = live2d_model_name
-        except Exception as e:
-            logger.critical(f"Error initializing Live2D: {e}")
-            logger.critical("Try to proceed without Live2D...")
 
     def init_asr(self, asr_config: ASRConfig) -> None:
         if not self.asr_engine or (self.character_config.asr_config != asr_config):
@@ -384,7 +367,6 @@ class ServiceContext:
                 agent_settings=agent_config.agent_settings.model_dump(),
                 llm_configs=agent_config.llm_configs.model_dump(),
                 system_prompt=system_prompt,
-                live2d_model=self.live2d_model,
                 tts_preprocessor_config=self.character_config.tts_preprocessor_config,
                 character_avatar=avatar,
                 system_config=self.system_config.model_dump(),
@@ -454,11 +436,6 @@ class ServiceContext:
 
             prompt_content = prompt_loader.load_util(prompt_file)
 
-            if prompt_name == "live2d_expression_prompt":
-                prompt_content = prompt_content.replace(
-                    "[<insert_emomap_keys>]", self.live2d_model.emo_str
-                )
-
             if prompt_name == "mcp_prompt":
                 continue
 
@@ -522,8 +499,7 @@ class ServiceContext:
                 await websocket.send_text(
                     json.dumps(
                         {
-                            "type": "set-model-and-conf",
-                            "model_info": self.live2d_model.model_info,
+                            "type": "set-conf",
                             "conf_name": self.character_config.conf_name,
                             "conf_uid": self.character_config.conf_uid,
                         }

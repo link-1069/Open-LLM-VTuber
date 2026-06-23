@@ -19,7 +19,6 @@ class AgentFactory:
         agent_settings: dict,
         llm_configs: dict,
         system_prompt: str,
-        live2d_model=None,
         tts_preprocessor_config=None,
         **kwargs,
     ) -> Type[AgentInterface]:
@@ -30,7 +29,6 @@ class AgentFactory:
             agent_settings: Settings for different types of agents
             llm_configs: Pool of LLM configurations
             system_prompt: The system prompt to use
-            live2d_model: Live2D model instance for expression extraction
             tts_preprocessor_config: Configuration for TTS preprocessing
             **kwargs: Additional arguments
         """
@@ -67,11 +65,10 @@ class AgentFactory:
             tool_executor: Optional[ToolExecutor] = kwargs.get("tool_executor")
             mcp_prompt_string: str = kwargs.get("mcp_prompt_string", "")
 
-            # Create the agent with the LLM and live2d_model
+            # Create the agent with the LLM
             return BasicMemoryAgent(
                 llm=llm,
                 system=system_prompt,
-                live2d_model=live2d_model,
                 tts_preprocessor_config=tts_preprocessor_config,
                 faster_first_response=basic_memory_settings.get(
                     "faster_first_response", True
@@ -103,7 +100,6 @@ class AgentFactory:
             return Mem0LLM(
                 user_id=kwargs.get("user_id", "default"),
                 system=system_prompt,
-                live2d_model=live2d_model,
                 **mem0_settings,
             )
 
@@ -119,7 +115,6 @@ class AgentFactory:
         elif conversation_agent_choice == "letta_agent":
             settings = agent_settings.get("letta_agent", {})
             return LettaAgent(
-                live2d_model=live2d_model,
                 id=settings.get("id"),
                 tts_preprocessor_config=tts_preprocessor_config,
                 faster_first_response=settings.get("faster_first_response"),
