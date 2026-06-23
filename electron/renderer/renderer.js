@@ -10,6 +10,7 @@ let wsReconnectTimer = null
 let cachedConfig = null
 let stage = null
 let streamController = null
+let returningToSetup = false
 
 window.__openLlmVtuberStageReady = false
 window.__openLlmVtuberStreamControllerReady = false
@@ -43,6 +44,20 @@ function initStreamController() {
       showStatus: showSubtitle,
       getSdkCtor: () => window.SrsRtcWhipWhepAsync,
       logger: console,
+      playTimeoutMs: 10000,
+      mediaReadyTimeoutMs: 10000,
+      onConnectionFailed: () => {
+        if (returningToSetup) {
+          return
+        }
+        returningToSetup = true
+        showSubtitle('SRS 连接失败，请重新设置投流地址')
+        window.electronAPI.openSetupWindow().catch((error) => {
+          returningToSetup = false
+          console.error('Failed to open SRS setup window:', error)
+          showSubtitle(`Failed to open SRS setup window: ${error.message}`)
+        })
+      },
     })
     window.__openLlmVtuberStreamControllerReady = true
   } catch (error) {

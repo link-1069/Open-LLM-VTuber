@@ -117,6 +117,214 @@ test('closes failed SDK and schedules retry', async () => {
   assert.equal(timers.scheduled[0].delay, 5000)
 })
 
+test('notifies connection failure when WHEP play fails', async () => {
+  const timers = createTimers()
+  const failures = []
+
+  class FailingSdk {
+    constructor() {
+      this.stream = { id: 'failed-stream' }
+    }
+
+    async play() {
+      throw new Error('play failed')
+    }
+
+    close() {}
+  }
+
+  const controller = createSrsStreamController({
+    video: { play: async () => {} },
+    showStatus: () => {},
+    getSdkCtor: () => FailingSdk,
+    logger: { log() {}, warn() {}, error() {} },
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+    onConnectionFailed: ({ whepUrl, error }) => {
+      failures.push({ whepUrl, message: error.message })
+    },
+  })
+
+  await controller.start('http://example.test/rtc/v1/whep/?app=live&stream=a')
+
+  assert.deepEqual(failures, [
+    {
+      whepUrl: 'http://example.test/rtc/v1/whep/?app=live&stream=a',
+      message: 'play failed',
+    },
+  ])
+})
+
+test('notifies connection failure when WHEP play times out', async () => {
+  const timers = createTimers()
+  const failures = []
+  const instances = []
+
+  class HangingSdk {
+    constructor() {
+      this.stream = { id: 'hanging-stream' }
+      this.closed = false
+      instances.push(this)
+    }
+
+    play() {
+      return new Promise(() => {})
+    }
+
+    close() {
+      this.closed = true
+    }
+  }
+
+  const controller = createSrsStreamController({
+    video: { play: async () => {} },
+    showStatus: () => {},
+    getSdkCtor: () => HangingSdk,
+    logger: { log() {}, warn() {}, error() {} },
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+    playTimeoutMs: 1000,
+    onConnectionFailed: ({ whepUrl, error }) => {
+      failures.push({ whepUrl, message: error.message })
+    },
+  })
+
+  const startPromise = controller.start('http://example.test/rtc/v1/whep/?app=live&stream=a')
+
+  assert.equal(timers.scheduled.length, 1)
+  assert.equal(timers.scheduled[0].delay, 1000)
+
+  timers.scheduled[0].fn()
+  await startPromise
+
+  assert.equal(instances[0].closed, true)
+  assert.deepEqual(failures, [
+    {
+      whepUrl: 'http://example.test/rtc/v1/whep/?app=live&stream=a',
+      message: 'SRS stream play timed out after 1000 ms',
+    },
+  ])
+  assert.equal(timers.scheduled.at(-1).delay, 5000)
+})
+
+test('notifies connection failure when video never becomes ready', async () => {
+  const timers = createTimers()
+  const failures = []
+  const instances = []
+
+  class SilentVideoSdk {
+    constructor() {
+      this.stream = { id: 'silent-video-stream' }
+      this.closed = false
+      instances.push(this)
+    }
+
+    async play() {
+      return { sessionid: 'silent-video-session' }
+    }
+
+    close() {
+      this.closed = true
+    }
+  }
+
+  const video = {
+    readyState: 0,
+    videoWidth: 0,
+    videoHeight: 0,
+    play: async () => {},
+  }
+  const controller = createSrsStreamController({
+    video,
+    showStatus: () => {},
+    getSdkCtor: () => SilentVideoSdk,
+    logger: { log() {}, warn() {}, error() {} },
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+    mediaReadyTimeoutMs: 1000,
+    onConnectionFailed: ({ whepUrl, error }) => {
+      failures.push({ whepUrl, message: error.message })
+    },
+  })
+
+  const startPromise = controller.start('http://example.test/rtc/v1/whep/?app=live&stream=a')
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.equal(timers.scheduled.length, 1)
+  assert.equal(timers.scheduled[0].delay, 1000)
+
+  timers.scheduled[0].fn()
+  await startPromise
+
+  assert.equal(instances[0].closed, true)
+  assert.deepEqual(failures, [
+    {
+      whepUrl: 'http://example.test/rtc/v1/whep/?app=live&stream=a',
+      message: 'SRS stream video did not become ready after 1000 ms',
+    },
+  ])
+  assert.equal(timers.scheduled.at(-1).delay, 5000)
+})
+
+test('notifies connection failure when video playback never settles', async () => {
+  const timers = createTimers()
+  const failures = []
+  const instances = []
+
+  class PendingVideoSdk {
+    constructor() {
+      this.stream = { id: 'pending-video-stream' }
+      this.closed = false
+      instances.push(this)
+    }
+
+    async play() {
+      return { sessionid: 'pending-video-session' }
+    }
+
+    close() {
+      this.closed = true
+    }
+  }
+
+  const video = {
+    readyState: 0,
+    videoWidth: 0,
+    videoHeight: 0,
+    play: () => new Promise(() => {}),
+  }
+  const controller = createSrsStreamController({
+    video,
+    showStatus: () => {},
+    getSdkCtor: () => PendingVideoSdk,
+    logger: { log() {}, warn() {}, error() {} },
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+    mediaReadyTimeoutMs: 1000,
+    onConnectionFailed: ({ whepUrl, error }) => {
+      failures.push({ whepUrl, message: error.message })
+    },
+  })
+
+  const startPromise = controller.start('http://example.test/rtc/v1/whep/?app=live&stream=a')
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.equal(timers.scheduled.length, 1)
+  assert.equal(timers.scheduled[0].delay, 1000)
+
+  timers.scheduled[0].fn()
+  await startPromise
+
+  assert.equal(instances[0].closed, true)
+  assert.deepEqual(failures, [
+    {
+      whepUrl: 'http://example.test/rtc/v1/whep/?app=live&stream=a',
+      message: 'SRS stream video did not become ready after 1000 ms',
+    },
+  ])
+  assert.equal(timers.scheduled.at(-1).delay, 5000)
+})
+
 test('retries when an established peer connection fails later', async () => {
   const timers = createTimers()
   const instances = []

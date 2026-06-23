@@ -5,6 +5,8 @@ const path = require('node:path')
 
 const htmlPath = path.join(__dirname, 'main.html')
 const mainProcessPath = path.join(__dirname, '..', 'main.js')
+const preloadPath = path.join(__dirname, '..', 'preload.js')
+const rendererScriptPath = path.join(__dirname, 'renderer.js')
 const setupScriptPath = path.join(__dirname, 'setup.js')
 
 function getScriptSources(html) {
@@ -62,4 +64,14 @@ test('setup page prefills the saved WHEP URL', () => {
   assert.notEqual(getConfigIndex, -1)
   assert.notEqual(prefillIndex, -1)
   assert.notEqual(disableConfirmIndex, -1)
+})
+
+test('main renderer can return to setup when SRS connection fails', () => {
+  const mainScript = fs.readFileSync(mainProcessPath, 'utf8')
+  const preloadScript = fs.readFileSync(preloadPath, 'utf8')
+  const rendererScript = fs.readFileSync(rendererScriptPath, 'utf8')
+
+  assert.match(preloadScript, /openSetupWindow:\s*\(\) => ipcRenderer\.invoke\('open-setup-window'\)/)
+  assert.match(mainScript, /ipcMain\.handle\('open-setup-window'[\s\S]*createSetupWindow\(\)[\s\S]*mainWindow\.close\(\)/)
+  assert.match(rendererScript, /onConnectionFailed:\s*\(\) => \{[\s\S]*window\.electronAPI\.openSetupWindow\(\)/)
 })

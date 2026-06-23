@@ -178,12 +178,7 @@ function createMainWindow() {
     const menu = Menu.buildFromTemplate([
       {
         label: '设置投流地址',
-        click: () => {
-          createSetupWindow()
-          if (mainWindow) {
-            mainWindow.close()
-          }
-        },
+        click: openSetupWindowAndCloseMain,
       },
     ])
     menu.popup({ window: mainWindow })
@@ -215,6 +210,13 @@ function createSetupWindow() {
   setupWindow.on('closed', () => { setupWindow = null })
 }
 
+function openSetupWindowAndCloseMain() {
+  createSetupWindow()
+  if (mainWindow) {
+    mainWindow.close()
+  }
+}
+
 app.whenReady().then(async () => {
   ipcMain.handle('get-config', () => normalizeConfig(readConfig()))
   ipcMain.handle('save-config', (_, cfg) => { writeConfig(cfg); return true })
@@ -222,6 +224,13 @@ app.whenReady().then(async () => {
   ipcMain.handle('open-main-window', () => {
     if (setupWindow) setupWindow.close()
     createMainWindow()
+  })
+  ipcMain.handle('open-setup-window', () => {
+    createSetupWindow()
+    if (mainWindow) {
+      mainWindow.close()
+    }
+    return true
   })
 
   try {
