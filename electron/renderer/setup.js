@@ -19,12 +19,20 @@ btnTest.addEventListener('click', async () => {
   try {
     // Send a minimal SDP POST to check if the WHEP endpoint is reachable.
     // A 200/201 means success; 400 means server reached but bad SDP (still reachable).
+    // A 404 also means the server answered; the path/stream may be missing, but the connection target is reachable.
     const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/sdp' },
       body: 'v=0\r\n',
     })
     if ([200, 201, 400, 404].includes(resp.status)) {
+      if (urlInput.value.trim() !== url) {
+        setStatus('输入已更改，请重新测试', 'err')
+        verifiedUrl = ''
+        btnConfirm.disabled = true
+        btnTest.disabled = false
+        return
+      }
       setStatus('✓ 服务器可达', 'ok')
       verifiedUrl = url
       btnConfirm.disabled = false
@@ -53,7 +61,7 @@ btnConfirm.addEventListener('click', async () => {
     })
     await window.electronAPI.openMainWindow()
   } catch (e) {
-    setStatus(`保存失败: ${e.message}`, 'err')
+    setStatus(`保存或打开失败: ${e.message}`, 'err')
     btnConfirm.disabled = false
   }
 })
