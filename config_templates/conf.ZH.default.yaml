@@ -11,7 +11,6 @@ system_config:
   port: 12393 # 服务器监听的端口
   config_alts_dir: 'characters' # 用于存放替代配置的目录
   tool_prompts: # 要插入到角色提示词中的工具提示词
-    live2d_expression_prompt: 'live2d_expression_prompt' # 将追加到系统提示末尾，让 LLM（大型语言模型）包含控制面部表情的关键字。支持的关键字将自动加载到 `[<insert_emomap_keys>]` 的位置。
     # 启用 think_tag_prompt 可让不具备思考输出的 LLM 也能展示内心想法、心理活动和动作（以括号形式呈现），但不会进行语音合成。更多详情请参考 think_tag_prompt。
     # think_tag_prompt: 'think_tag_prompt'
     # live_prompt: 'live_prompt'
@@ -31,7 +30,6 @@ system_config:
 character_config:
   conf_name: 'mao_pro' # 角色配置文件的名称
   conf_uid: 'mao_pro_001' # 角色配置的唯一标识符
-  live2d_model_name: 'mao_pro' # Live2D 模型名称
   character_name: 'Mao' # 将在群聊中使用，并显示为 AI 的名称。
   avatar: 'mao.png' # 建议使用正方形图像作为头像。将其保存到 avatars 文件夹中。留空则使用角色名称的首字母作为头像。
   human_name: 'Human' # 将在群聊中使用，并显示为人类的名称。
