@@ -30,7 +30,6 @@
         "filter": [
           "src/**",
           "run_server.py",
-          "conf.yaml",
           "config_templates/**",
           "characters/**",
           "upgrade_codes/**",

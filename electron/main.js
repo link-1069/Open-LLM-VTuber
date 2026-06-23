@@ -65,7 +65,7 @@ function ensureBackendConfig(projectRoot) {
 }
 
 function assertUvAvailable() {
-  const result = spawnSync('uv', ['--version'], { shell: true, stdio: 'ignore' })
+  const result = spawnSync('uv', ['--version'], { stdio: 'ignore' })
   if (result.error && result.error.code === 'ENOENT') {
     throw new Error('uv is not available in PATH. Install uv or add it to PATH before starting the bundled backend.')
   }
@@ -210,7 +210,7 @@ app.whenReady().then(async () => {
     // Continue anyway - user may have server running separately
   }
 
-  const cfg = readConfig()
+  const cfg = normalizeConfig(readConfig())
   if (cfg.whep_url) {
     createMainWindow()
   } else {
