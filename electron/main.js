@@ -54,8 +54,30 @@ function stopPythonProcess() {
   pythonProcess = null
 }
 
+function ensureBackendConfig(projectRoot) {
+  const targetConfig = path.join(projectRoot, 'conf.yaml')
+  if (fs.existsSync(targetConfig)) {
+    return
+  }
+
+  const defaultConfig = path.join(projectRoot, 'config_templates', 'conf.default.yaml')
+  fs.copyFileSync(defaultConfig, targetConfig)
+}
+
+function assertUvAvailable() {
+  const result = spawnSync('uv', ['--version'], { shell: true, stdio: 'ignore' })
+  if (result.error && result.error.code === 'ENOENT') {
+    throw new Error('uv is not available in PATH. Install uv or add it to PATH before starting the bundled backend.')
+  }
+  if (result.status !== 0) {
+    throw new Error('uv check failed. Ensure uv is installed and available in PATH.')
+  }
+}
+
 function spawnPython() {
   const projectRoot = getProjectRoot()
+  ensureBackendConfig(projectRoot)
+  assertUvAvailable()
   pythonProcess = spawn('uv', ['run', 'run_server.py'], {
     cwd: projectRoot,
     shell: true,
@@ -100,6 +122,10 @@ function spawnPython() {
       })
     }
     function onError(err) {
+      if (err.code === 'ENOENT') {
+        fail(new Error('uv is not available in PATH. Install uv or add it to PATH before starting the bundled backend.'))
+        return
+      }
       fail(err)
     }
     function onExit(code, signal) {

@@ -16,8 +16,7 @@
     "productName": "Open-LLM-VTuber",
     "directories": { "output": "dist" },
     "win": {
-      "target": "nsis",
-      "icon": "../assets/icon.ico"
+      "target": "nsis"
     },
     "files": [
       "**/*",
@@ -34,6 +33,11 @@
           "conf.yaml",
           "config_templates/**",
           "characters/**",
+          "upgrade_codes/**",
+          "backgrounds/**",
+          "avatars/**",
+          "web_tool/**",
+          "frontend/**",
           "prompts/**",
           "pyproject.toml",
           "uv.lock"
