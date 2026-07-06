@@ -49,6 +49,30 @@ test('main window context menu can return to stream setup', () => {
   assert.ok(openSetupIndex < closeMainIndex)
 })
 
+test('Electron starts on the external h5 entry page instead of the local chromakey window', () => {
+  const script = fs.readFileSync(mainProcessPath, 'utf8')
+  const readyBlockIndex = script.indexOf('app.whenReady().then(async () => {')
+  const entryWindowIndex = script.indexOf('createEntryWindow()', readyBlockIndex)
+  const spawnPythonIndex = script.indexOf('await spawnPython()', readyBlockIndex)
+
+  assert.match(script, /const ENTRY_PAGE_URL = 'http:\/\/localhost:8500\/static\/h5\.html'/)
+  assert.match(script, /function createEntryWindow\(\)/)
+  assert.match(script, /entryWindow\.loadURL\(ENTRY_PAGE_URL\)/)
+  assert.notEqual(entryWindowIndex, -1)
+  assert.notEqual(spawnPythonIndex, -1)
+  assert.ok(entryWindowIndex < spawnPythonIndex)
+  assert.doesNotMatch(script, /if \(cfg\.whep_url\) \{[\s\S]*createMainWindow\(\)[\s\S]*\} else \{[\s\S]*createSetupWindow\(\)[\s\S]*\}/)
+})
+
+test('entry window hides the native title bar and application menu', () => {
+  const script = fs.readFileSync(mainProcessPath, 'utf8')
+
+  assert.match(script, /function createEntryWindow\(\)/)
+  assert.match(script, /entryWindow = new BrowserWindow\(\{[\s\S]*frame: false,[\s\S]*autoHideMenuBar: true,[\s\S]*\}\)/)
+  assert.match(script, /entryWindow\.setMenu\(null\)/)
+  assert.match(script, /Menu\.setApplicationMenu\(null\)/)
+})
+
 test('setup window creation reuses an existing setup window', () => {
   const script = fs.readFileSync(mainProcessPath, 'utf8')
 

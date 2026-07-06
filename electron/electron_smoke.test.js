@@ -1,12 +1,44 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
+const http = require('node:http')
 const os = require('node:os')
 const path = require('node:path')
 const { _electron } = require('playwright')
 const electronPath = require('electron')
 
-test('loads the Three.js chromakey stage in a real Electron main window', { timeout: 120000 }, async () => {
+function startEntryPageServer() {
+  const html = [
+    '<!doctype html>',
+    '<html lang="zh-CN">',
+    '<head><meta charset="UTF-8"><title>LangQingV6</title></head>',
+    '<body>',
+    '  <button id="startButton">开始体验</button>',
+    '  <script>window.__entryPageLoaded = true</script>',
+    '</body>',
+    '</html>',
+  ].join('')
+
+  const server = http.createServer((req, res) => {
+    if (req.url === '/static/h5.html') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.end(html)
+      return
+    }
+    res.writeHead(404)
+    res.end('not found')
+  })
+
+  return new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(8500, '127.0.0.1', () => {
+      server.off('error', reject)
+      resolve(server)
+    })
+  })
+}
+
+test('loads the external h5 entry page in a real Electron window', { timeout: 120000 }, async () => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ollv-electron-smoke-'))
   const configPath = path.join(userDataDir, 'config.json')
   fs.writeFileSync(
@@ -20,7 +52,9 @@ test('loads the Three.js chromakey stage in a real Electron main window', { time
 
   const fatalErrors = []
   let app = null
+  let server = null
   try {
+    server = await startEntryPageServer()
     app = await _electron.launch({
       executablePath: electronPath,
       args: [process.cwd(), `--user-data-dir=${userDataDir}`],
@@ -38,46 +72,30 @@ test('loads the Three.js chromakey stage in a real Electron main window', { time
     page.on('pageerror', (error) => fatalErrors.push(error.stack || error.message))
 
     await page.waitForLoadState('domcontentloaded')
-    await page.waitForFunction(() => {
-      return Boolean(
-        window.THREE &&
-        window.__openLlmVtuberStageReady === true &&
-        window.__openLlmVtuberStreamControllerReady === true &&
-        document.querySelector('#stage canvas')
-      )
-    }, null, { timeout: 30000 })
+    await page.waitForFunction(() => window.__entryPageLoaded === true, null, { timeout: 30000 })
 
     const result = await page.evaluate(() => {
-      const video = document.getElementById('video')
       return {
-        hasThree: Boolean(window.THREE),
-        stageReady: window.__openLlmVtuberStageReady,
-        streamControllerReady: window.__openLlmVtuberStreamControllerReady,
-        canvasCount: document.querySelectorAll('#stage canvas').length,
-        canvasId: document.querySelector('#stage canvas')?.id || '',
-        videoHasSrcObject: Boolean(video && video.srcObject),
-        scripts: Array.from(document.scripts).map((script) => script.getAttribute('src')),
+        href: window.location.href,
+        title: document.title,
+        entryPageLoaded: window.__entryPageLoaded,
+        hasStartButton: Boolean(document.getElementById('startButton')),
+        hasBundledChromakeyStage: Boolean(document.querySelector('#stage canvas')),
       }
     })
 
-    assert.equal(result.hasThree, true)
-    assert.equal(result.stageReady, true)
-    assert.equal(result.streamControllerReady, true)
-    assert.equal(result.canvasCount, 1)
-    assert.equal(result.canvasId, 'three-canvas')
-    assert.equal(result.videoHasSrcObject, true)
-    assert.deepEqual(result.scripts, [
-      'vendor/three.min.js',
-      'srs.sdk.js',
-      'chroma_key_material.js',
-      'three_stage.js',
-      'srs_stream.js',
-      'renderer.js',
-    ])
+    assert.equal(result.href, 'http://localhost:8500/static/h5.html')
+    assert.equal(result.title, 'LangQingV6')
+    assert.equal(result.entryPageLoaded, true)
+    assert.equal(result.hasStartButton, true)
+    assert.equal(result.hasBundledChromakeyStage, false)
     assert.deepEqual(fatalErrors, [])
   } finally {
     if (app) {
       await app.close()
+    }
+    if (server) {
+      await new Promise((resolve) => server.close(resolve))
     }
     fs.rmSync(userDataDir, { recursive: true, force: true })
   }

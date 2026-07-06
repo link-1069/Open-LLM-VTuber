@@ -5,7 +5,9 @@ const { spawn, spawnSync } = require('child_process')
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json')
 const SERVER_PORT = 12393
+const ENTRY_PAGE_URL = 'http://localhost:8500/static/h5.html'
 
+let entryWindow = null
 let mainWindow = null
 let setupWindow = null
 let pythonProcess = null
@@ -187,6 +189,32 @@ function createMainWindow() {
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
+function createEntryWindow() {
+  if (entryWindow) {
+    if (entryWindow.isMinimized()) {
+      entryWindow.restore()
+    }
+    entryWindow.show()
+    entryWindow.focus()
+    return
+  }
+  entryWindow = new BrowserWindow({
+    width: 480,
+    height: 800,
+    frame: false,
+    autoHideMenuBar: true,
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+  entryWindow.setMenu(null)
+  entryWindow.loadURL(ENTRY_PAGE_URL)
+  entryWindow.on('closed', () => { entryWindow = null })
+}
+
 function createSetupWindow() {
   if (setupWindow) {
     if (setupWindow.isMinimized()) {
@@ -218,6 +246,8 @@ function openSetupWindowAndCloseMain() {
 }
 
 app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null)
+
   ipcMain.handle('get-config', () => normalizeConfig(readConfig()))
   ipcMain.handle('save-config', (_, cfg) => { writeConfig(cfg); return true })
   ipcMain.handle('get-ws-url', () => `ws://localhost:${SERVER_PORT}/client-ws`)
@@ -233,19 +263,14 @@ app.whenReady().then(async () => {
     return true
   })
 
+  createEntryWindow()
+
   try {
     await spawnPython()
     console.log('Python server ready.')
   } catch (e) {
     console.error('Python server failed to start:', e.message)
     // Continue anyway - user may have server running separately
-  }
-
-  const cfg = normalizeConfig(readConfig())
-  if (cfg.whep_url) {
-    createMainWindow()
-  } else {
-    createSetupWindow()
   }
 })
 
