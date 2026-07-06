@@ -50,6 +50,14 @@
       }
     }
 
+    function muteVideoAudio() {
+      if (!video) {
+        return
+      }
+      video.muted = true
+      video.volume = 0
+    }
+
     function scheduleRetry(whepUrl, scheduledAttemptId) {
       if (retryTimer) {
         return
@@ -231,6 +239,7 @@
         sdk = new SrsRtcWhipWhepAsync()
         attachDisconnectHandlers(sdk, whepUrl, thisAttemptId)
         if (video) {
+          muteVideoAudio()
           video.srcObject = sdk.stream
         }
       } catch (error) {

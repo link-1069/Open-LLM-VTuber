@@ -39,14 +39,14 @@
     }
 
     #video {
-      /* Hidden source for Three.js VideoTexture; audio plays from here. */
+      /* Hidden source for Three.js VideoTexture; keep stream audio silent. */
       display: none;
     }
   </style>
 </head>
 <body>
   <div id="stage"></div>
-  <video id="video" autoplay playsinline></video>
+  <video id="video" autoplay playsinline muted></video>
   <div id="subtitle"></div>
 
   <script src="vendor/three.min.js"></script>

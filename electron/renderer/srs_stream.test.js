@@ -80,6 +80,43 @@ test('binds SDK stream to video and starts playback', async () => {
   assert.equal(timers.scheduled.length, 0)
 })
 
+test('mutes video audio before binding SDK stream', async () => {
+  const timers = createTimers()
+  const stream = { id: 'muted-stream' }
+
+  class FakeSdk {
+    constructor() {
+      this.stream = stream
+    }
+
+    async play() {
+      return { sessionid: 'muted-session' }
+    }
+
+    close() {}
+  }
+
+  const video = {
+    muted: false,
+    volume: 1,
+    async play() {},
+  }
+  const controller = createSrsStreamController({
+    video,
+    showStatus: () => {},
+    getSdkCtor: () => FakeSdk,
+    logger: { log() {}, warn() {}, error() {} },
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+  })
+
+  await controller.start('http://example.test/rtc/v1/whep/?app=live&stream=a')
+
+  assert.equal(video.muted, true)
+  assert.equal(video.volume, 0)
+  assert.equal(video.srcObject, stream)
+})
+
 test('closes failed SDK and schedules retry', async () => {
   const timers = createTimers()
   const instances = []
