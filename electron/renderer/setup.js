@@ -1,4 +1,5 @@
 const urlInput  = document.getElementById('whep-url')
+const btnLatest = document.getElementById('btn-latest')
 const btnTest   = document.getElementById('btn-test')
 const btnConfirm = document.getElementById('btn-confirm')
 const statusEl  = document.getElementById('status')
@@ -21,6 +22,39 @@ async function prefillSavedConfig() {
     setStatus(`读取配置失败: ${e.message}`, 'err')
   }
 }
+
+btnLatest.addEventListener('click', async () => {
+  setStatus('正在获取最新 id...')
+  verifiedUrl = ''
+  btnLatest.disabled = true
+  btnConfirm.disabled = true
+  try {
+    const resp = await fetch('http://localhost:8500/api/active-streams', { method: 'GET' })
+    if (!resp.ok) {
+      setStatus(`获取最新 id 失败: HTTP ${resp.status}`, 'err')
+      return
+    }
+
+    const body = await resp.json()
+    if (!body?.ok) {
+      setStatus('获取最新 id 失败: 接口返回不可用', 'err')
+      return
+    }
+
+    const whepUrl = window.setupProbe.getWhepUrlFromStreamId(body?.stream?.av_stream_id)
+    if (!whepUrl) {
+      setStatus('获取最新 id 失败: 未找到 stream id', 'err')
+      return
+    }
+
+    urlInput.value = whepUrl
+    setStatus('已获取最新 id，请先完成连接测试', 'ok')
+  } catch (e) {
+    setStatus(`获取最新 id 失败: ${e.message}`, 'err')
+  } finally {
+    btnLatest.disabled = false
+  }
+})
 
 btnTest.addEventListener('click', async () => {
   const url = urlInput.value.trim()

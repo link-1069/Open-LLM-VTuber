@@ -7,6 +7,14 @@ function getSrsApiUrlFromWhepUrl(whepUrl) {
   }
 }
 
+function getWhepUrlFromStreamId(streamId) {
+  const normalizedStreamId = String(streamId ?? '').trim()
+  if (!normalizedStreamId) {
+    return ''
+  }
+  return `http://127.0.0.1:1985/rtc/v1/whep/?app=live&stream=${encodeURIComponent(normalizedStreamId)}`
+}
+
 function isReachableWhepProbeResponse(status, body) {
   if ([200, 201, 400, 404].includes(status)) {
     return true
@@ -27,6 +35,7 @@ function isReachableWhepProbeResponse(status, body) {
 if (typeof window !== 'undefined') {
   window.setupProbe = {
     getSrsApiUrlFromWhepUrl,
+    getWhepUrlFromStreamId,
     isReachableWhepProbeResponse,
   }
 }
@@ -34,6 +43,7 @@ if (typeof window !== 'undefined') {
 if (typeof module !== 'undefined') {
   module.exports = {
     getSrsApiUrlFromWhepUrl,
+    getWhepUrlFromStreamId,
     isReachableWhepProbeResponse,
   }
 }

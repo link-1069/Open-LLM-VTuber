@@ -3,6 +3,7 @@ const assert = require('node:assert/strict')
 
 const {
   getSrsApiUrlFromWhepUrl,
+  getWhepUrlFromStreamId,
   isReachableWhepProbeResponse,
 } = require('./setup_probe')
 
@@ -18,6 +19,18 @@ test('derives HTTPS SRS API URL from WHEP URL', () => {
     getSrsApiUrlFromWhepUrl('https://example.com:1990/rtc/v1/whep/?app=live&stream=avatar'),
     'https://example.com:1990/api/v1'
   )
+})
+
+test('builds WHEP URL from active stream id', () => {
+  assert.equal(
+    getWhepUrlFromStreamId('1783311281510392034'),
+    'http://127.0.0.1:1985/rtc/v1/whep/?app=live&stream=1783311281510392034'
+  )
+})
+
+test('rejects empty active stream id', () => {
+  assert.equal(getWhepUrlFromStreamId(''), '')
+  assert.equal(getWhepUrlFromStreamId(null), '')
 })
 
 test('treats SRS invalid SDP negotiation response as reachable', () => {
