@@ -1,26 +1,53 @@
+;(function initializeWindowBounds(globalObject) {
 const DEFAULT_WINDOW_SIZE = Object.freeze({ width: 480, height: 800 })
 const MIN_WINDOW_WIDTH = 320
 const MIN_WINDOW_HEIGHT = 240
 const MIN_VISIBLE_SIZE = 50
+const NATIVE_INT_MIN = -2147483648
+const NATIVE_INT_MAX = 2147483647
+
+function isNativeInteger(value) {
+  return Number.isInteger(value) && value >= NATIVE_INT_MIN && value <= NATIVE_INT_MAX
+}
 
 function validateBounds(bounds) {
   const errors = {}
   const value = bounds && typeof bounds === 'object' ? bounds : {}
 
   for (const field of ['x', 'y', 'width', 'height']) {
-    if (!Number.isSafeInteger(value[field])) {
-      errors[field] = '请输入有效整数'
+    if (!isNativeInteger(value[field])) {
+      errors[field] = 'Value must be a signed 32-bit integer.'
     }
   }
 
   if (!errors.width && value.width < MIN_WINDOW_WIDTH) {
-    errors.width = `宽度不能小于 ${MIN_WINDOW_WIDTH}px`
+    errors.width = `Width must be at least ${MIN_WINDOW_WIDTH}px.`
   }
   if (!errors.height && value.height < MIN_WINDOW_HEIGHT) {
-    errors.height = `高度不能小于 ${MIN_WINDOW_HEIGHT}px`
+    errors.height = `Height must be at least ${MIN_WINDOW_HEIGHT}px.`
   }
 
   return errors
+}
+
+function parseBoundsInput(values) {
+  const bounds = {}
+  const parseErrors = {}
+
+  for (const field of ['x', 'y', 'width', 'height']) {
+    const rawValue = String(values[field] ?? '').trim()
+    if (!/^-?\d+$/.test(rawValue)) {
+      parseErrors[field] = 'Enter an integer.'
+      continue
+    }
+    bounds[field] = Number(rawValue)
+  }
+
+  const errors = { ...validateBounds(bounds), ...parseErrors }
+  if (Object.keys(errors).length > 0) {
+    return { bounds: null, errors }
+  }
+  return { bounds, errors: {} }
 }
 
 function normalizeStoredBounds(bounds) {
@@ -81,14 +108,26 @@ function centerBoundsInWorkArea(size, workArea) {
   }
 }
 
-module.exports = {
+const windowBoundsAPI = {
   DEFAULT_WINDOW_SIZE,
   MIN_VISIBLE_SIZE,
   MIN_WINDOW_HEIGHT,
   MIN_WINDOW_WIDTH,
+  NATIVE_INT_MAX,
+  NATIVE_INT_MIN,
   centerBoundsInWorkArea,
   constrainBoundsToWorkArea,
   hasMinimumVisibleArea,
   normalizeStoredBounds,
+  parseBoundsInput,
   validateBounds,
 }
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = windowBoundsAPI
+}
+
+if (globalObject) {
+  globalObject.windowBounds = windowBoundsAPI
+}
+})(typeof window !== 'undefined' ? window : null)

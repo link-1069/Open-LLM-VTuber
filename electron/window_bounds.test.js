@@ -6,10 +6,12 @@ const {
   MIN_VISIBLE_SIZE,
   MIN_WINDOW_HEIGHT,
   MIN_WINDOW_WIDTH,
+  NATIVE_INT_MAX,
   centerBoundsInWorkArea,
   constrainBoundsToWorkArea,
   hasMinimumVisibleArea,
   normalizeStoredBounds,
+  parseBoundsInput,
   validateBounds,
 } = require('./window_bounds')
 
@@ -26,6 +28,34 @@ test('reports field-level validation errors', () => {
   const errors = validateBounds({ x: '0', y: 0, width: MIN_WINDOW_WIDTH - 1, height: MIN_WINDOW_HEIGHT - 1 })
 
   assert.deepEqual(Object.keys(errors).sort(), ['height', 'width', 'x'])
+})
+
+test('reports native integer overflow on the corresponding field', () => {
+  const errors = validateBounds({
+    x: 0,
+    y: 0,
+    width: NATIVE_INT_MAX + 1,
+    height: 800,
+  })
+
+  assert.deepEqual(Object.keys(errors), ['width'])
+  assert.match(errors.width, /32-bit integer/)
+})
+
+test('parses input and delegates all bounds rules to the shared validator', () => {
+  assert.deepEqual(
+    parseBoundsInput({ x: '-120', y: '40', width: '640', height: '900' }),
+    { bounds: { x: -120, y: 40, width: 640, height: 900 }, errors: {} }
+  )
+
+  const invalid = parseBoundsInput({
+    x: '',
+    y: '1.5',
+    width: String(MIN_WINDOW_WIDTH - 1),
+    height: String(NATIVE_INT_MAX + 1),
+  })
+  assert.equal(invalid.bounds, null)
+  assert.deepEqual(Object.keys(invalid.errors).sort(), ['height', 'width', 'x', 'y'])
 })
 
 test('accepts negative coordinates when at least 50px remains visible', () => {

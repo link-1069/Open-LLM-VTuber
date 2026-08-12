@@ -199,7 +199,7 @@ function persistMainWindowBounds(bounds) {
   } catch (error) {
     const status = {
       state: 'error',
-      message: error?.message || '无法写入窗口配置',
+      message: error?.message || 'Unable to write the window configuration.',
     }
     updateMainWindowSaveStatus(status)
     return status
@@ -266,12 +266,12 @@ function applyMainWindowBounds(bounds) {
     return {
       ok: false,
       fieldErrors,
-      message: '请修正标记的字段',
+      message: 'Correct the highlighted fields.',
     }
   }
 
   if (!hasMinimumVisibleArea(bounds, getDisplayWorkAreas(), MIN_VISIBLE_SIZE)) {
-    const message = `窗口必须至少保留 ${MIN_VISIBLE_SIZE}×${MIN_VISIBLE_SIZE}px 可见`
+    const message = `At least ${MIN_VISIBLE_SIZE}×${MIN_VISIBLE_SIZE}px of the window must remain visible.`
     return {
       ok: false,
       fieldErrors: { x: message, y: message },
@@ -295,10 +295,13 @@ function applyMainWindowBounds(bounds) {
       saveStatus,
     }
   } catch (error) {
+    const message = error?.message || 'The operating system rejected these window bounds.'
     return {
       ok: false,
-      fieldErrors: {},
-      message: error?.message || '操作系统拒绝了该窗口参数',
+      fieldErrors: Object.fromEntries(
+        ['x', 'y', 'width', 'height'].map((field) => [field, message])
+      ),
+      message,
     }
   }
 }

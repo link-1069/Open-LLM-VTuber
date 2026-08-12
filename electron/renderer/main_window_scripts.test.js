@@ -26,6 +26,7 @@ test('loads Three.js and renderer modules before the main renderer', () => {
     'chroma_key_material.js',
     'three_stage.js',
     'srs_stream.js',
+    '../window_bounds.js',
     'window_controls.js',
     'renderer.js',
   ])
@@ -46,6 +47,7 @@ test('main window includes an invisible hotspot and in-window control panel', ()
   assert.match(html, /id="window-width"/)
   assert.match(html, /id="window-height"/)
   assert.match(html, /id="window-reset"/)
+  assert.match(controlsScript, /window\.windowBounds/)
   assert.match(controlsScript, /createTripleClickGate\(5000\)/)
   assert.match(preloadScript, /getMainWindowState:\s*\(\) => ipcRenderer\.invoke\('get-main-window-state'\)/)
   assert.match(preloadScript, /setMainWindowBounds:\s*\(bounds\) => ipcRenderer\.invoke\('set-main-window-bounds', bounds\)/)

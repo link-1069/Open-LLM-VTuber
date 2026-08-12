@@ -1,5 +1,7 @@
-const WINDOW_CONTROL_MIN_WIDTH = 320
-const WINDOW_CONTROL_MIN_HEIGHT = 240
+const windowBounds = typeof module !== 'undefined' && module.exports
+  ? require('../window_bounds')
+  : window.windowBounds
+const { parseBoundsInput } = windowBounds
 
 function createTripleClickGate(timeoutMs) {
   let clickCount = 0
@@ -27,38 +29,6 @@ function createTripleClickGate(timeoutMs) {
       firstClickAt = 0
     },
   }
-}
-
-function parseBoundsInput(values) {
-  const bounds = {}
-  const errors = {}
-
-  for (const field of ['x', 'y', 'width', 'height']) {
-    const rawValue = String(values[field] ?? '').trim()
-    if (!/^-?\d+$/.test(rawValue)) {
-      errors[field] = '请输入整数'
-      continue
-    }
-
-    const numericValue = Number(rawValue)
-    if (!Number.isSafeInteger(numericValue)) {
-      errors[field] = '数值超出有效范围'
-      continue
-    }
-    bounds[field] = numericValue
-  }
-
-  if (!errors.width && bounds.width < WINDOW_CONTROL_MIN_WIDTH) {
-    errors.width = `最小 ${WINDOW_CONTROL_MIN_WIDTH}px`
-  }
-  if (!errors.height && bounds.height < WINDOW_CONTROL_MIN_HEIGHT) {
-    errors.height = `最小 ${WINDOW_CONTROL_MIN_HEIGHT}px`
-  }
-
-  if (Object.keys(errors).length > 0) {
-    return { bounds: null, errors }
-  }
-  return { bounds, errors: {} }
 }
 
 function initializeWindowControls(windowObject, documentObject) {
@@ -113,14 +83,14 @@ function initializeWindowControls(windowObject, documentObject) {
 
   function applySaveStatus(saveStatus) {
     if (saveStatus?.state === 'error') {
-      setStatus('error', `保存失败：${saveStatus.message || '未知错误'}`)
+      setStatus('error', `Save failed: ${saveStatus.message || 'Unknown error'}`)
       return
     }
     if (saveStatus?.state === 'saving') {
-      setStatus('saving', '正在自动保存…')
+      setStatus('saving', 'Auto-saving…')
       return
     }
-    setStatus('saved', '已自动保存')
+    setStatus('saved', 'Auto-saved')
   }
 
   async function refreshState() {
@@ -129,7 +99,7 @@ function initializeWindowControls(windowObject, documentObject) {
       updateFields(state.bounds)
       applySaveStatus(state.saveStatus)
     } catch (error) {
-      setStatus('error', `读取窗口状态失败：${error.message}`)
+      setStatus('error', `Failed to read window state: ${error.message}`)
     }
   }
 
@@ -144,7 +114,7 @@ function initializeWindowControls(windowObject, documentObject) {
   function applyBoundsResult(result) {
     if (!result?.ok) {
       showFieldErrors(result?.fieldErrors)
-      setStatus('error', result?.message || '窗口位置或尺寸无效')
+      setStatus('error', result?.message || 'Invalid window position or size.')
       return false
     }
     showFieldErrors()
@@ -160,16 +130,16 @@ function initializeWindowControls(windowObject, documentObject) {
     const parsed = parseBoundsInput(rawValues)
     showFieldErrors(parsed.errors)
     if (!parsed.bounds) {
-      setStatus('error', '请修正标记的字段')
+      setStatus('error', 'Correct the highlighted fields.')
       return
     }
 
-    setStatus('saving', '正在自动保存…')
+    setStatus('saving', 'Auto-saving…')
     try {
       const result = await electronAPI.setMainWindowBounds(parsed.bounds)
       applyBoundsResult(result)
     } catch (error) {
-      setStatus('error', `设置失败：${error.message}`)
+      setStatus('error', `Failed to update window bounds: ${error.message}`)
     }
   }
 
@@ -201,12 +171,12 @@ function initializeWindowControls(windowObject, documentObject) {
 
   resetButton.addEventListener('click', async () => {
     showFieldErrors()
-    setStatus('saving', '正在自动保存…')
+    setStatus('saving', 'Auto-saving…')
     try {
       const result = await electronAPI.resetMainWindowBounds()
       applyBoundsResult(result)
     } catch (error) {
-      setStatus('error', `恢复默认失败：${error.message}`)
+      setStatus('error', `Failed to restore defaults: ${error.message}`)
     }
   })
 
@@ -225,7 +195,6 @@ function initializeWindowControls(windowObject, documentObject) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     createTripleClickGate,
-    parseBoundsInput,
   }
 }
 

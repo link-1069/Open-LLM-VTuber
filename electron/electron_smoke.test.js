@@ -75,6 +75,7 @@ test('loads the Three.js chromakey stage in a real Electron main window', { time
       'chroma_key_material.js',
       'three_stage.js',
       'srs_stream.js',
+      '../window_bounds.js',
       'window_controls.js',
       'renderer.js',
     ])
@@ -88,8 +89,18 @@ test('loads the Three.js chromakey stage in a real Electron main window', { time
     const originalBounds = await app.evaluate(({ BrowserWindow }) => {
       return BrowserWindow.getAllWindows()[0].getBounds()
     })
-    const nextWidth = Math.max(320, originalBounds.width - 20)
     const widthInput = page.locator('#window-width')
+    await widthInput.fill('2147483648')
+    await widthInput.press('Enter')
+    await page.waitForFunction(() => {
+      return document.getElementById('window-width-error').textContent.includes('32-bit integer')
+    })
+    const boundsAfterInvalidInput = await app.evaluate(({ BrowserWindow }) => {
+      return BrowserWindow.getAllWindows()[0].getBounds()
+    })
+    assert.deepEqual(boundsAfterInvalidInput, originalBounds)
+
+    const nextWidth = Math.max(320, originalBounds.width - 20)
     await widthInput.fill(String(nextWidth))
     await widthInput.press('Enter')
     await page.waitForFunction((width) => {
