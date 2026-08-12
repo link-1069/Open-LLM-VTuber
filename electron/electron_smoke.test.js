@@ -14,6 +14,7 @@ test('loads the Three.js chromakey stage in a real Electron main window', { time
     JSON.stringify({
       whep_url: 'http://127.0.0.1:1985/rtc/v1/whep/?app=live&stream=1782211996791800259',
       last_updated: new Date().toISOString(),
+      window_bounds: { x: 0, y: 0, width: 480, height: 800 },
     }, null, 2),
     'utf8'
   )
@@ -56,6 +57,7 @@ test('loads the Three.js chromakey stage in a real Electron main window', { time
         canvasCount: document.querySelectorAll('#stage canvas').length,
         canvasId: document.querySelector('#stage canvas')?.id || '',
         videoHasSrcObject: Boolean(video && video.srcObject),
+        controlsPanelHidden: document.getElementById('window-controls-panel')?.hidden,
         scripts: Array.from(document.scripts).map((script) => script.getAttribute('src')),
       }
     })
@@ -66,14 +68,45 @@ test('loads the Three.js chromakey stage in a real Electron main window', { time
     assert.equal(result.canvasCount, 1)
     assert.equal(result.canvasId, 'three-canvas')
     assert.equal(result.videoHasSrcObject, true)
+    assert.equal(result.controlsPanelHidden, true)
     assert.deepEqual(result.scripts, [
       'vendor/three.min.js',
       'srs.sdk.js',
       'chroma_key_material.js',
       'three_stage.js',
       'srs_stream.js',
+      'window_controls.js',
       'renderer.js',
     ])
+
+    const hotspot = page.locator('#window-controls-hotspot')
+    await hotspot.click({ force: true })
+    await hotspot.click({ force: true })
+    await hotspot.click({ force: true })
+    await page.waitForFunction(() => !document.getElementById('window-controls-panel').hidden)
+
+    const originalBounds = await app.evaluate(({ BrowserWindow }) => {
+      return BrowserWindow.getAllWindows()[0].getBounds()
+    })
+    const nextWidth = Math.max(320, originalBounds.width - 20)
+    const widthInput = page.locator('#window-width')
+    await widthInput.fill(String(nextWidth))
+    await widthInput.press('Enter')
+    await page.waitForFunction((width) => {
+      return document.getElementById('window-width').value === String(width) &&
+        document.getElementById('window-save-status').dataset.state === 'saved'
+    }, nextWidth)
+
+    const appliedBounds = await app.evaluate(({ BrowserWindow }) => {
+      return BrowserWindow.getAllWindows()[0].getBounds()
+    })
+    const savedConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+    assert.equal(appliedBounds.width, nextWidth)
+    assert.equal(savedConfig.window_bounds.width, nextWidth)
+    assert.equal(savedConfig.whep_url, 'http://127.0.0.1:1985/rtc/v1/whep/?app=live&stream=1782211996791800259')
+
+    await page.keyboard.press('Escape')
+    assert.equal(await page.locator('#window-controls-panel').isHidden(), true)
     assert.deepEqual(fatalErrors, [])
   } finally {
     if (app) {

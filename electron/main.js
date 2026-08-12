@@ -1,14 +1,28 @@
-const { app, BrowserWindow, ipcMain, Menu } = require('electron')
+const { app, BrowserWindow, ipcMain, Menu, screen } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { spawn, spawnSync } = require('child_process')
+const {
+  DEFAULT_WINDOW_SIZE,
+  MIN_VISIBLE_SIZE,
+  MIN_WINDOW_HEIGHT,
+  MIN_WINDOW_WIDTH,
+  centerBoundsInWorkArea,
+  constrainBoundsToWorkArea,
+  hasMinimumVisibleArea,
+  normalizeStoredBounds,
+  validateBounds,
+} = require('./window_bounds')
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json')
 const SERVER_PORT = 12393
+const WINDOW_BOUNDS_SAVE_DELAY_MS = 300
 
 let mainWindow = null
 let setupWindow = null
 let pythonProcess = null
+let mainWindowBoundsSaveTimer = null
+let mainWindowSaveStatus = { state: 'saved' }
 
 function getProjectRoot() {
   return app.isPackaged ? path.join(process.resourcesPath, 'app') : path.join(__dirname, '..')
@@ -23,15 +37,18 @@ function readConfig() {
 }
 
 function normalizeConfig(cfg) {
+  const windowBounds = normalizeStoredBounds(cfg?.window_bounds)
   return {
     whep_url: typeof cfg?.whep_url === 'string' ? cfg.whep_url : '',
     last_updated: typeof cfg?.last_updated === 'string' ? cfg.last_updated : new Date().toISOString(),
+    ...(windowBounds ? { window_bounds: windowBounds } : {}),
   }
 }
 
 function writeConfig(cfg) {
+  const nextConfig = normalizeConfig({ ...readConfig(), ...cfg })
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true })
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(normalizeConfig(cfg), null, 2), 'utf8')
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(nextConfig, null, 2), 'utf8')
 }
 
 function handlePythonOutput(data, log, prefix, markReady) {
@@ -150,6 +167,167 @@ function spawnPython() {
   })
 }
 
+function getDisplayWorkAreas() {
+  return screen.getAllDisplays().map((display) => display.workArea)
+}
+
+function boundsEqual(first, second) {
+  return first.x === second.x &&
+    first.y === second.y &&
+    first.width === second.width &&
+    first.height === second.height
+}
+
+function sendToMainWindow(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) {
+    return
+  }
+  mainWindow.webContents.send(channel, payload)
+}
+
+function updateMainWindowSaveStatus(status) {
+  mainWindowSaveStatus = status
+  sendToMainWindow('main-window-save-status', status)
+}
+
+function persistMainWindowBounds(bounds) {
+  try {
+    writeConfig({ window_bounds: bounds })
+    const status = { state: 'saved' }
+    updateMainWindowSaveStatus(status)
+    return status
+  } catch (error) {
+    const status = {
+      state: 'error',
+      message: error?.message || '无法写入窗口配置',
+    }
+    updateMainWindowSaveStatus(status)
+    return status
+  }
+}
+
+function clearMainWindowBoundsSaveTimer() {
+  if (!mainWindowBoundsSaveTimer) {
+    return
+  }
+  clearTimeout(mainWindowBoundsSaveTimer)
+  mainWindowBoundsSaveTimer = null
+}
+
+function correctMainWindowBounds(bounds, fallbackWorkArea) {
+  if (hasMinimumVisibleArea(bounds, getDisplayWorkAreas(), MIN_VISIBLE_SIZE)) {
+    return bounds
+  }
+  return constrainBoundsToWorkArea(bounds, fallbackWorkArea, MIN_VISIBLE_SIZE)
+}
+
+function flushMainWindowBoundsSave() {
+  if (!mainWindowBoundsSaveTimer || !mainWindow || mainWindow.isDestroyed()) {
+    clearMainWindowBoundsSaveTimer()
+    return null
+  }
+
+  clearMainWindowBoundsSaveTimer()
+  const currentBounds = mainWindow.getBounds()
+  const display = screen.getDisplayMatching(currentBounds)
+  const correctedBounds = correctMainWindowBounds(currentBounds, display.workArea)
+  if (!boundsEqual(currentBounds, correctedBounds)) {
+    mainWindow.setBounds(correctedBounds)
+    sendToMainWindow('main-window-bounds-changed', correctedBounds)
+  }
+  return persistMainWindowBounds(correctedBounds)
+}
+
+function queueMainWindowBoundsSave() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return
+  }
+
+  const bounds = mainWindow.getBounds()
+  sendToMainWindow('main-window-bounds-changed', bounds)
+  updateMainWindowSaveStatus({ state: 'saving' })
+  clearMainWindowBoundsSaveTimer()
+  mainWindowBoundsSaveTimer = setTimeout(
+    flushMainWindowBoundsSave,
+    WINDOW_BOUNDS_SAVE_DELAY_MS
+  )
+}
+
+function assertMainWindowSender(event) {
+  const senderWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!mainWindow || senderWindow !== mainWindow) {
+    throw new Error('Window controls are only available in the main display window.')
+  }
+}
+
+function applyMainWindowBounds(bounds) {
+  const fieldErrors = validateBounds(bounds)
+  if (Object.keys(fieldErrors).length > 0) {
+    return {
+      ok: false,
+      fieldErrors,
+      message: '请修正标记的字段',
+    }
+  }
+
+  if (!hasMinimumVisibleArea(bounds, getDisplayWorkAreas(), MIN_VISIBLE_SIZE)) {
+    const message = `窗口必须至少保留 ${MIN_VISIBLE_SIZE}×${MIN_VISIBLE_SIZE}px 可见`
+    return {
+      ok: false,
+      fieldErrors: { x: message, y: message },
+      message,
+    }
+  }
+
+  try {
+    if (mainWindow.isMaximized()) {
+      mainWindow.restore()
+    }
+    mainWindow.setBounds(bounds)
+    const appliedBounds = mainWindow.getBounds()
+    clearMainWindowBoundsSaveTimer()
+    sendToMainWindow('main-window-bounds-changed', appliedBounds)
+    updateMainWindowSaveStatus({ state: 'saving' })
+    const saveStatus = persistMainWindowBounds(appliedBounds)
+    return {
+      ok: true,
+      bounds: appliedBounds,
+      saveStatus,
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      fieldErrors: {},
+      message: error?.message || '操作系统拒绝了该窗口参数',
+    }
+  }
+}
+
+function resetMainWindowBounds() {
+  const currentBounds = mainWindow.getBounds()
+  const display = screen.getDisplayMatching(currentBounds)
+  const defaultBounds = centerBoundsInWorkArea(DEFAULT_WINDOW_SIZE, display.workArea)
+  return applyMainWindowBounds(defaultBounds)
+}
+
+function getInitialMainWindowBounds() {
+  const storedBounds = normalizeStoredBounds(readConfig().window_bounds)
+  if (!storedBounds) {
+    return { bounds: null, corrected: false }
+  }
+
+  if (hasMinimumVisibleArea(storedBounds, getDisplayWorkAreas(), MIN_VISIBLE_SIZE)) {
+    return { bounds: storedBounds, corrected: false }
+  }
+
+  const correctedBounds = constrainBoundsToWorkArea(
+    storedBounds,
+    screen.getPrimaryDisplay().workArea,
+    MIN_VISIBLE_SIZE
+  )
+  return { bounds: correctedBounds, corrected: true }
+}
+
 function createMainWindow() {
   if (mainWindow) {
     if (mainWindow.isMinimized()) {
@@ -159,9 +337,11 @@ function createMainWindow() {
     mainWindow.focus()
     return
   }
+  const initialWindowBounds = getInitialMainWindowBounds()
   mainWindow = new BrowserWindow({
-    width: 480,
-    height: 800,
+    ...(initialWindowBounds.bounds || DEFAULT_WINDOW_SIZE),
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
@@ -183,8 +363,17 @@ function createMainWindow() {
     ])
     menu.popup({ window: mainWindow })
   })
+  mainWindow.on('move', queueMainWindowBoundsSave)
+  mainWindow.on('resize', queueMainWindowBoundsSave)
+  mainWindow.on('close', flushMainWindowBoundsSave)
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'main.html'))
-  mainWindow.on('closed', () => { mainWindow = null })
+  if (initialWindowBounds.corrected) {
+    persistMainWindowBounds(initialWindowBounds.bounds)
+  }
+  mainWindow.on('closed', () => {
+    clearMainWindowBoundsSaveTimer()
+    mainWindow = null
+  })
 }
 
 function createSetupWindow() {
@@ -221,6 +410,21 @@ app.whenReady().then(async () => {
   ipcMain.handle('get-config', () => normalizeConfig(readConfig()))
   ipcMain.handle('save-config', (_, cfg) => { writeConfig(cfg); return true })
   ipcMain.handle('get-ws-url', () => `ws://localhost:${SERVER_PORT}/client-ws`)
+  ipcMain.handle('get-main-window-state', (event) => {
+    assertMainWindowSender(event)
+    return {
+      bounds: mainWindow.getBounds(),
+      saveStatus: mainWindowSaveStatus,
+    }
+  })
+  ipcMain.handle('set-main-window-bounds', (event, bounds) => {
+    assertMainWindowSender(event)
+    return applyMainWindowBounds(bounds)
+  })
+  ipcMain.handle('reset-main-window-bounds', (event) => {
+    assertMainWindowSender(event)
+    return resetMainWindowBounds()
+  })
   ipcMain.handle('open-main-window', () => {
     if (setupWindow) setupWindow.close()
     createMainWindow()
@@ -250,6 +454,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  flushMainWindowBoundsSave()
   stopPythonProcess()
 })
 

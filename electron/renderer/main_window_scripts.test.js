@@ -7,6 +7,7 @@ const htmlPath = path.join(__dirname, 'main.html')
 const mainProcessPath = path.join(__dirname, '..', 'main.js')
 const preloadPath = path.join(__dirname, '..', 'preload.js')
 const rendererScriptPath = path.join(__dirname, 'renderer.js')
+const windowControlsScriptPath = path.join(__dirname, 'window_controls.js')
 const setupScriptPath = path.join(__dirname, 'setup.js')
 
 function getScriptSources(html) {
@@ -25,8 +26,32 @@ test('loads Three.js and renderer modules before the main renderer', () => {
     'chroma_key_material.js',
     'three_stage.js',
     'srs_stream.js',
+    'window_controls.js',
     'renderer.js',
   ])
+})
+
+test('main window includes an invisible hotspot and in-window control panel', () => {
+  const html = fs.readFileSync(htmlPath, 'utf8')
+  const controlsScript = fs.readFileSync(windowControlsScriptPath, 'utf8')
+  const preloadScript = fs.readFileSync(preloadPath, 'utf8')
+  const mainScript = fs.readFileSync(mainProcessPath, 'utf8')
+
+  assert.match(html, /id="window-controls-hotspot"/)
+  assert.match(html, /width:\s*50px;[\s\S]*height:\s*50px;/)
+  assert.match(html, /top:\s*0;[\s\S]*right:\s*0;/)
+  assert.match(html, /id="window-controls-panel"[^>]*hidden/)
+  assert.match(html, /id="window-x"/)
+  assert.match(html, /id="window-y"/)
+  assert.match(html, /id="window-width"/)
+  assert.match(html, /id="window-height"/)
+  assert.match(html, /id="window-reset"/)
+  assert.match(controlsScript, /createTripleClickGate\(5000\)/)
+  assert.match(preloadScript, /getMainWindowState:\s*\(\) => ipcRenderer\.invoke\('get-main-window-state'\)/)
+  assert.match(preloadScript, /setMainWindowBounds:\s*\(bounds\) => ipcRenderer\.invoke\('set-main-window-bounds', bounds\)/)
+  assert.match(mainScript, /ipcMain\.handle\('get-main-window-state'/)
+  assert.match(mainScript, /ipcMain\.handle\('set-main-window-bounds'/)
+  assert.match(mainScript, /ipcMain\.handle\('reset-main-window-bounds'/)
 })
 
 test('ships the local Three.js browser build used by the main window', () => {
@@ -41,7 +66,7 @@ test('main window context menu can return to stream setup', () => {
   const openSetupIndex = script.indexOf('createSetupWindow()', menuItemIndex)
   const closeMainIndex = script.indexOf('mainWindow.close()', menuItemIndex)
 
-  assert.match(script, /const \{ app, BrowserWindow, ipcMain, Menu \} = require\('electron'\)/)
+  assert.match(script, /const \{ app, BrowserWindow, ipcMain, Menu, screen \} = require\('electron'\)/)
   assert.match(script, /mainWindow\.webContents\.on\('context-menu'/)
   assert.notEqual(menuItemIndex, -1)
   assert.notEqual(openSetupIndex, -1)

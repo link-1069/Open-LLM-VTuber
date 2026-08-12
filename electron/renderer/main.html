@@ -42,18 +42,209 @@
       /* Hidden source for Three.js VideoTexture; keep stream audio silent. */
       display: none;
     }
+
+    #window-controls-hotspot {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 50px;
+      height: 50px;
+      z-index: 10002;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: transparent;
+      opacity: 0;
+      outline: none;
+      cursor: default;
+      -webkit-app-region: no-drag;
+    }
+
+    #window-controls-panel {
+      position: absolute;
+      top: 58px;
+      right: 8px;
+      z-index: 10001;
+      width: min(300px, calc(100vw - 16px));
+      max-height: calc(100vh - 66px);
+      overflow-y: auto;
+      padding: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 12px;
+      background: rgba(18, 22, 30, 0.9);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.38);
+      color: #f5f7fa;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      -webkit-app-region: no-drag;
+    }
+
+    #window-controls-panel[hidden] { display: none; }
+
+    .window-controls-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .window-controls-header h2 {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    #window-controls-close {
+      width: 28px;
+      height: 28px;
+      border: 0;
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .window-controls-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .window-control-field {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .window-control-label {
+      color: rgba(255, 255, 255, 0.78);
+    }
+
+    .window-control-input-wrap {
+      display: flex;
+      align-items: center;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 7px;
+      background: rgba(0, 0, 0, 0.25);
+      overflow: hidden;
+    }
+
+    .window-control-input-wrap:focus-within {
+      border-color: #70b7ff;
+    }
+
+    .window-control-input-wrap input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      padding: 8px;
+      outline: none;
+      background: transparent;
+      color: #fff;
+      font: inherit;
+    }
+
+    .window-control-unit {
+      padding-right: 7px;
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 11px;
+    }
+
+    .window-control-error {
+      min-height: 14px;
+      color: #ff9c9c;
+      font-size: 11px;
+      line-height: 14px;
+    }
+
+    #window-reset {
+      width: 100%;
+      margin-top: 4px;
+      padding: 9px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    #window-controls-close:hover,
+    #window-reset:hover {
+      background: rgba(255, 255, 255, 0.17);
+    }
+
+    #window-save-status {
+      min-height: 18px;
+      margin-top: 10px;
+      color: rgba(255, 255, 255, 0.68);
+      font-size: 12px;
+    }
+
+    #window-save-status[data-state="saved"] { color: #9be7b1; }
+    #window-save-status[data-state="error"] { color: #ff9c9c; }
   </style>
 </head>
 <body>
   <div id="stage"></div>
   <video id="video" autoplay playsinline muted></video>
   <div id="subtitle"></div>
+  <button
+    id="window-controls-hotspot"
+    type="button"
+    tabindex="-1"
+    aria-label="打开窗口控制面板"
+  ></button>
+  <section id="window-controls-panel" aria-hidden="true" hidden>
+    <div class="window-controls-header">
+      <h2>窗口控制</h2>
+      <button id="window-controls-close" type="button" aria-label="关闭控制面板">×</button>
+    </div>
+    <div class="window-controls-grid">
+      <label class="window-control-field" for="window-x">
+        <span class="window-control-label">X 位置</span>
+        <span class="window-control-input-wrap">
+          <input id="window-x" type="text" inputmode="numeric" autocomplete="off">
+          <span class="window-control-unit">px</span>
+        </span>
+        <span id="window-x-error" class="window-control-error"></span>
+      </label>
+      <label class="window-control-field" for="window-y">
+        <span class="window-control-label">Y 位置</span>
+        <span class="window-control-input-wrap">
+          <input id="window-y" type="text" inputmode="numeric" autocomplete="off">
+          <span class="window-control-unit">px</span>
+        </span>
+        <span id="window-y-error" class="window-control-error"></span>
+      </label>
+      <label class="window-control-field" for="window-width">
+        <span class="window-control-label">宽度</span>
+        <span class="window-control-input-wrap">
+          <input id="window-width" type="text" inputmode="numeric" autocomplete="off">
+          <span class="window-control-unit">px</span>
+        </span>
+        <span id="window-width-error" class="window-control-error"></span>
+      </label>
+      <label class="window-control-field" for="window-height">
+        <span class="window-control-label">高度</span>
+        <span class="window-control-input-wrap">
+          <input id="window-height" type="text" inputmode="numeric" autocomplete="off">
+          <span class="window-control-unit">px</span>
+        </span>
+        <span id="window-height-error" class="window-control-error"></span>
+      </label>
+    </div>
+    <button id="window-reset" type="button">恢复默认</button>
+    <div id="window-save-status" data-state="saved" role="status" aria-live="polite">已自动保存</div>
+  </section>
 
   <script src="vendor/three.min.js"></script>
   <script src="srs.sdk.js"></script>
   <script src="chroma_key_material.js"></script>
   <script src="three_stage.js"></script>
   <script src="srs_stream.js"></script>
+  <script src="window_controls.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>
