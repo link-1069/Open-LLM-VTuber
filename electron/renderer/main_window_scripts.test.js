@@ -17,7 +17,8 @@ function getScriptSources(html) {
 
 test('loads Three.js and renderer modules before the main renderer', () => {
   const html = fs.readFileSync(htmlPath, 'utf8')
-  assert.match(html, /<div id="stage"><\/div>/)
+  assert.match(html, /<div id="stage-0" class="stream-stage"><\/div>/)
+  assert.match(html, /<div id="stage-1" class="stream-stage"><\/div>/)
   assert.doesNotMatch(html, /<canvas id="canvas"><\/canvas>/)
 
   assert.deepEqual(getScriptSources(html), [
@@ -26,6 +27,8 @@ test('loads Three.js and renderer modules before the main renderer', () => {
     'chroma_key_material.js',
     'three_stage.js',
     'srs_stream.js',
+    'digital_human_stream_manager.js',
+    'auto_connect.js',
     '../window_bounds.js',
     'window_controls.js',
     'renderer.js',
@@ -62,18 +65,16 @@ test('ships the local Three.js browser build used by the main window', () => {
   assert.ok(fs.statSync(vendorPath).size > 100000)
 })
 
-test('main window context menu can return to stream setup', () => {
+test('main window context menu can restart automatic connection detection', () => {
   const script = fs.readFileSync(mainProcessPath, 'utf8')
-  const menuItemIndex = script.indexOf("label: '设置投流地址'")
-  const openSetupIndex = script.indexOf('createSetupWindow()', menuItemIndex)
-  const closeMainIndex = script.indexOf('mainWindow.close()', menuItemIndex)
+  const menuItemIndex = script.indexOf("label: '重新检测连接'")
+  const restartIndex = script.indexOf('click: restartAutomaticAccess', menuItemIndex)
 
   assert.match(script, /const \{ app, BrowserWindow, ipcMain, Menu, screen \} = require\('electron'\)/)
   assert.match(script, /mainWindow\.webContents\.on\('context-menu'/)
   assert.notEqual(menuItemIndex, -1)
-  assert.notEqual(openSetupIndex, -1)
-  assert.notEqual(closeMainIndex, -1)
-  assert.ok(openSetupIndex < closeMainIndex)
+  assert.notEqual(restartIndex, -1)
+  assert.match(script, /function restartAutomaticAccess\(\) \{[\s\S]*showAutoConnectWindow\(\)[\s\S]*sendToMainWindow\('restart-auto-connect'\)/)
 })
 
 test('setup window creation reuses an existing setup window', () => {
@@ -82,23 +83,19 @@ test('setup window creation reuses an existing setup window', () => {
   assert.match(script, /if \(setupWindow\) \{[\s\S]*setupWindow\.show\(\)[\s\S]*setupWindow\.focus\(\)[\s\S]*return[\s\S]*\}/)
 })
 
-test('setup page prefills the saved WHEP URL', () => {
+test('setup page renders automatic connection progress', () => {
   const script = fs.readFileSync(setupScriptPath, 'utf8')
-  const getConfigIndex = script.indexOf('window.electronAPI.getConfig()')
-  const prefillIndex = script.indexOf('urlInput.value = config.whep_url', getConfigIndex)
-  const disableConfirmIndex = script.indexOf('btnConfirm.disabled = true', prefillIndex)
-
-  assert.notEqual(getConfigIndex, -1)
-  assert.notEqual(prefillIndex, -1)
-  assert.notEqual(disableConfirmIndex, -1)
+  assert.match(script, /window\.electronAPI\.onAutoConnectProgress\(renderProgress\)/)
+  assert.match(script, /case 'connecting'/)
+  assert.match(script, /case 'waiting-frame'/)
 })
 
-test('main renderer can return to setup when SRS connection fails', () => {
+test('main renderer delegates stream failure recovery to automatic access', () => {
   const mainScript = fs.readFileSync(mainProcessPath, 'utf8')
   const preloadScript = fs.readFileSync(preloadPath, 'utf8')
   const rendererScript = fs.readFileSync(rendererScriptPath, 'utf8')
 
-  assert.match(preloadScript, /openSetupWindow:\s*\(\) => ipcRenderer\.invoke\('open-setup-window'\)/)
-  assert.match(mainScript, /ipcMain\.handle\('open-setup-window'[\s\S]*createSetupWindow\(\)[\s\S]*mainWindow\.close\(\)/)
-  assert.match(rendererScript, /onConnectionFailed:\s*\(\) => \{[\s\S]*window\.electronAPI\.openSetupWindow\(\)/)
+  assert.match(preloadScript, /showAutoConnectWindow:\s*\(\) => ipcRenderer\.invoke\('show-auto-connect-window'\)/)
+  assert.match(mainScript, /ipcMain\.handle\('show-auto-connect-window'[\s\S]*showAutoConnectWindow\(\)/)
+  assert.match(rendererScript, /showSetup:\s*\(\) => window\.electronAPI\.showAutoConnectWindow\(\)/)
 })

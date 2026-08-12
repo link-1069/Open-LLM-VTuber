@@ -20,6 +20,11 @@
     const mediaReadyTimeoutMs = Number.isFinite(options.mediaReadyTimeoutMs) && options.mediaReadyTimeoutMs > 0
       ? options.mediaReadyTimeoutMs
       : 0
+    const disconnectGraceMs = Number.isFinite(options.disconnectGraceMs) && options.disconnectGraceMs > 0
+      ? options.disconnectGraceMs
+      : 0
+    const autoRetry = options.autoRetry !== false
+    const onConnected = options.onConnected || function () {}
     const onConnectionFailed = options.onConnectionFailed || function () {}
     const logger = options.logger || root.console || { log() {}, warn() {}, error() {} }
 
@@ -27,6 +32,15 @@
     let retryTimer = null
     let currentWhepUrl = null
     let attemptId = 0
+    let disconnectTimer = null
+
+    function clearDisconnectTimer() {
+      if (!disconnectTimer) {
+        return
+      }
+      clearTimeoutFn(disconnectTimer)
+      disconnectTimer = null
+    }
 
     function clearRetryTimer() {
       if (retryTimer) {
@@ -36,6 +50,7 @@
     }
 
     function closeSdk() {
+      clearDisconnectTimer()
       if (!sdk) {
         return
       }
@@ -59,6 +74,9 @@
     }
 
     function scheduleRetry(whepUrl, scheduledAttemptId) {
+      if (!autoRetry) {
+        return
+      }
       if (retryTimer) {
         return
       }
@@ -75,6 +93,7 @@
         return
       }
       logger.warn('SRS stream disconnected:', reason)
+      notifyConnectionFailed(whepUrl, new Error(reason))
       closeSdk()
       scheduleRetry(whepUrl, activeAttemptId)
     }
@@ -185,14 +204,33 @@
 
     function attachDisconnectHandlers(activeSdk, whepUrl, activeAttemptId) {
       const pc = activeSdk && activeSdk.pc
-      const retryStates = ['failed', 'disconnected', 'closed']
       const onConnectionStateChange = function () {
         if (!pc) {
           return
         }
-        if (retryStates.includes(pc.connectionState) || retryStates.includes(pc.iceConnectionState)) {
+        const states = [pc.connectionState, pc.iceConnectionState]
+        if (states.includes('failed') || states.includes('closed')) {
+          clearDisconnectTimer()
           handleStreamDisconnected(whepUrl, activeAttemptId, `pc=${pc.connectionState || 'unknown'}, ice=${pc.iceConnectionState || 'unknown'}`)
+          return
         }
+        if (states.includes('disconnected')) {
+          if (!disconnectGraceMs) {
+            handleStreamDisconnected(whepUrl, activeAttemptId, `pc=${pc.connectionState || 'unknown'}, ice=${pc.iceConnectionState || 'unknown'}`)
+            return
+          }
+          if (!disconnectTimer) {
+            disconnectTimer = setTimeoutFn(function () {
+              disconnectTimer = null
+              const latestStates = [pc.connectionState, pc.iceConnectionState]
+              if (latestStates.includes('disconnected')) {
+                handleStreamDisconnected(whepUrl, activeAttemptId, `pc=${pc.connectionState || 'unknown'}, ice=${pc.iceConnectionState || 'unknown'}`)
+              }
+            }, disconnectGraceMs)
+          }
+          return
+        }
+        clearDisconnectTimer()
       }
 
       if (pc) {
@@ -231,7 +269,9 @@
       try {
         const SrsRtcWhipWhepAsync = getSdkCtor()
         if (typeof SrsRtcWhipWhepAsync !== 'function') {
-          showStatus('SRS SDK is not available')
+          const error = new Error('SRS SDK is not available')
+          showStatus(error.message)
+          notifyConnectionFailed(whepUrl, error)
           scheduleRetry(whepUrl, thisAttemptId)
           return
         }
@@ -248,6 +288,7 @@
         }
         logger.error('SRS stream initialization failed:', error)
         showStatus('SRS stream initialization failed')
+        notifyConnectionFailed(whepUrl, error)
         closeSdk()
         scheduleRetry(whepUrl, thisAttemptId)
         return
@@ -259,6 +300,7 @@
           return
         }
         logger.log('SRS session:', session && session.sessionid)
+        onConnected({ whepUrl, session })
         await waitForVideoPlayback()
       } catch (error) {
         if (thisAttemptId !== attemptId) {

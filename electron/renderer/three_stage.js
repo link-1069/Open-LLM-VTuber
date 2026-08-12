@@ -25,6 +25,7 @@
     const windowRef = options.windowRef || root.window || root
     const showError = options.showError || function () {}
     const createMaterial = options.createMaterial || getDefaultCreateMaterial()
+    const onFrameRendered = options.onFrameRendered || function () {}
 
     if (!THREE) {
       const error = new Error('Three.js is not available')
@@ -44,7 +45,7 @@
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true })
     renderer.setClearColor(0x000000, 0)
     renderer.setPixelRatio(Math.min(windowRef.devicePixelRatio || 1, 2))
-    renderer.domElement.id = 'three-canvas'
+    renderer.domElement.className = 'three-canvas'
     renderer.domElement.style.position = 'absolute'
     renderer.domElement.style.top = '0'
     renderer.domElement.style.left = '0'
@@ -78,6 +79,7 @@
           material.userData.videoTexture.needsUpdate = true
         }
         renderer.render(scene, camera)
+        onFrameRendered()
       }
       frameId = windowRef.requestAnimationFrame(animate)
     }

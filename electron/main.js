@@ -23,6 +23,8 @@ let setupWindow = null
 let pythonProcess = null
 let mainWindowBoundsSaveTimer = null
 let mainWindowSaveStatus = { state: 'saved' }
+let latestAutoConnectProgress = null
+let isQuitting = false
 
 function getProjectRoot() {
   return app.isPackaged ? path.join(process.resourcesPath, 'app') : path.join(__dirname, '..')
@@ -185,6 +187,13 @@ function sendToMainWindow(channel, payload) {
   mainWindow.webContents.send(channel, payload)
 }
 
+function sendToSetupWindow(channel, payload) {
+  if (!setupWindow || setupWindow.isDestroyed() || setupWindow.webContents.isDestroyed()) {
+    return
+  }
+  setupWindow.webContents.send(channel, payload)
+}
+
 function updateMainWindowSaveStatus(status) {
   mainWindowSaveStatus = status
   sendToMainWindow('main-window-save-status', status)
@@ -331,13 +340,15 @@ function getInitialMainWindowBounds() {
   return { bounds: correctedBounds, corrected: true }
 }
 
-function createMainWindow() {
+function createMainWindow({ show = true } = {}) {
   if (mainWindow) {
-    if (mainWindow.isMinimized()) {
-      mainWindow.restore()
+    if (show) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore()
+      }
+      mainWindow.show()
+      mainWindow.focus()
     }
-    mainWindow.show()
-    mainWindow.focus()
     return
   }
   const initialWindowBounds = getInitialMainWindowBounds()
@@ -351,24 +362,30 @@ function createMainWindow() {
     hasShadow: false,
     resizable: true,
     skipTaskbar: false,
+    show,
+    paintWhenInitiallyHidden: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
   })
   mainWindow.webContents.on('context-menu', () => {
     const menu = Menu.buildFromTemplate([
       {
-        label: '设置投流地址',
-        click: openSetupWindowAndCloseMain,
+        label: '重新检测连接',
+        click: restartAutomaticAccess,
       },
     ])
     menu.popup({ window: mainWindow })
   })
   mainWindow.on('move', queueMainWindowBoundsSave)
   mainWindow.on('resize', queueMainWindowBoundsSave)
-  mainWindow.on('close', flushMainWindowBoundsSave)
+  mainWindow.on('close', (event) => {
+    flushMainWindowBoundsSave()
+    quitFromWindowClose(event)
+  })
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'main.html'))
   if (initialWindowBounds.corrected) {
     persistMainWindowBounds(initialWindowBounds.bounds)
@@ -390,26 +407,53 @@ function createSetupWindow() {
   }
   setupWindow = new BrowserWindow({
     width: 520,
-    height: 240,
+    height: 420,
     resizable: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
   })
   setupWindow.loadFile(path.join(__dirname, 'renderer', 'setup.html'))
+  setupWindow.webContents.on('did-finish-load', () => {
+    if (latestAutoConnectProgress) {
+      sendToSetupWindow('auto-connect-progress', latestAutoConnectProgress)
+    }
+  })
+  setupWindow.on('close', quitFromWindowClose)
   setupWindow.on('closed', () => { setupWindow = null })
 }
 
-function openSetupWindowAndCloseMain() {
-  createSetupWindow()
-  if (mainWindow) {
-    mainWindow.close()
+function quitFromWindowClose(event) {
+  if (isQuitting) {
+    return
+  }
+  event.preventDefault()
+  app.quit()
+}
+
+function showMainWindow() {
+  createMainWindow({ show: true })
+  if (setupWindow && !setupWindow.isDestroyed()) {
+    setupWindow.hide()
   }
 }
 
-app.whenReady().then(async () => {
+function showAutoConnectWindow() {
+  createSetupWindow()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.hide()
+  }
+}
+
+function restartAutomaticAccess() {
+  showAutoConnectWindow()
+  sendToMainWindow('restart-auto-connect')
+}
+
+app.whenReady().then(() => {
   ipcMain.handle('get-config', () => normalizeConfig(readConfig()))
   ipcMain.handle('save-config', (_, cfg) => { writeConfig(cfg); return true })
   ipcMain.handle('get-ws-url', () => `ws://localhost:${SERVER_PORT}/client-ws`)
@@ -428,35 +472,36 @@ app.whenReady().then(async () => {
     assertMainWindowSender(event)
     return resetMainWindowBounds()
   })
-  ipcMain.handle('open-main-window', () => {
-    if (setupWindow) setupWindow.close()
-    createMainWindow()
-  })
-  ipcMain.handle('open-setup-window', () => {
-    createSetupWindow()
-    if (mainWindow) {
-      mainWindow.close()
-    }
+  ipcMain.handle('show-main-window', (event) => {
+    assertMainWindowSender(event)
+    showMainWindow()
     return true
   })
+  ipcMain.handle('show-auto-connect-window', (event) => {
+    assertMainWindowSender(event)
+    showAutoConnectWindow()
+    return true
+  })
+  ipcMain.on('auto-connect-progress', (event, snapshot) => {
+    assertMainWindowSender(event)
+    latestAutoConnectProgress = snapshot
+    sendToSetupWindow('auto-connect-progress', snapshot)
+  })
 
-  try {
-    await spawnPython()
-    console.log('Python server ready.')
-  } catch (e) {
+  createSetupWindow()
+  createMainWindow({ show: false })
+
+  Promise.resolve()
+    .then(spawnPython)
+    .then(() => console.log('Python server ready.'))
+    .catch((e) => {
     console.error('Python server failed to start:', e.message)
     // Continue anyway - user may have server running separately
-  }
-
-  const cfg = normalizeConfig(readConfig())
-  if (cfg.whep_url) {
-    createMainWindow()
-  } else {
-    createSetupWindow()
-  }
+    })
 })
 
 app.on('before-quit', () => {
+  isQuitting = true
   flushMainWindowBoundsSave()
   stopPythonProcess()
 })

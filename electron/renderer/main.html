@@ -14,11 +14,14 @@
       -webkit-app-region: drag;
     }
 
-    #stage {
+    .stream-layer,
+    .stream-stage {
       position: absolute;
       top: 0; left: 0;
       width: 100%; height: 100%;
     }
+
+    .stream-layer[hidden] { display: none; }
 
     #subtitle {
       position: absolute;
@@ -38,7 +41,7 @@
       white-space: pre-wrap;
     }
 
-    #video {
+    .stream-video {
       /* Hidden source for Three.js VideoTexture; keep stream audio silent. */
       display: none;
     }
@@ -187,8 +190,14 @@
   </style>
 </head>
 <body>
-  <div id="stage"></div>
-  <video id="video" autoplay playsinline muted></video>
+  <div id="stream-layer-0" class="stream-layer" hidden>
+    <div id="stage-0" class="stream-stage"></div>
+    <video id="video-0" class="stream-video" autoplay playsinline muted></video>
+  </div>
+  <div id="stream-layer-1" class="stream-layer" hidden>
+    <div id="stage-1" class="stream-stage"></div>
+    <video id="video-1" class="stream-video" autoplay playsinline muted></video>
+  </div>
   <div id="subtitle"></div>
   <button
     id="window-controls-hotspot"
@@ -244,6 +253,8 @@
   <script src="chroma_key_material.js"></script>
   <script src="three_stage.js"></script>
   <script src="srs_stream.js"></script>
+  <script src="digital_human_stream_manager.js"></script>
+  <script src="auto_connect.js"></script>
   <script src="../window_bounds.js"></script>
   <script src="window_controls.js"></script>
   <script src="renderer.js"></script>

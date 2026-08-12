@@ -1,16 +1,22 @@
 'use strict'
 
-const stageEl = document.getElementById('stage')
-const video = document.getElementById('video')
+const ACTIVE_STREAM_URL = 'http://localhost:8500/api/active-streams'
+const SRS_API_URL = 'http://127.0.0.1:1985/api/v1'
+const WHEP_BASE_URL = 'http://127.0.0.1:1985/rtc/v1/whep/?app=live&stream='
+
 const subtitle = document.getElementById('subtitle')
+const slots = [0, 1].map((index) => ({
+  layer: document.getElementById(`stream-layer-${index}`),
+  mount: document.getElementById(`stage-${index}`),
+  video: document.getElementById(`video-${index}`),
+}))
 
 let subtitleTimer = null
 let ws = null
 let wsReconnectTimer = null
-let cachedConfig = null
-let stage = null
-let streamController = null
-let returningToSetup = false
+let streamManager = null
+let autoConnectController = null
+let unsubscribeRestart = null
 
 window.__openLlmVtuberStageReady = false
 window.__openLlmVtuberStreamControllerReady = false
@@ -22,47 +28,98 @@ function showSubtitle(text) {
   subtitleTimer = setTimeout(() => { subtitle.style.display = 'none' }, 5000)
 }
 
-function initThreeStage() {
-  try {
-    stage = window.createThreeVideoStage({
+function createStreamManager() {
+  return window.createDigitalHumanStreamManager({
+    slots,
+    connectTimeoutMs: 10000,
+    frameTimeoutMs: 120000,
+    disconnectGraceMs: 3000,
+    createStage: ({ video, mount, onFrameRendered }) => window.createThreeVideoStage({
       THREE: window.THREE,
       video,
-      mount: stageEl,
-      showError: showSubtitle,
-    })
-    window.__openLlmVtuberStageReady = true
-  } catch (error) {
-    console.error('Three.js stage initialization failed:', error)
-    showSubtitle(`Three.js stage failed: ${error.message}`)
-  }
+      mount,
+      onFrameRendered,
+      showError: (message) => console.error('Three.js stage error:', message),
+    }),
+    createStreamController: (options) => window.createSrsStreamController({
+      ...options,
+      getSdkCtor: () => window.SrsRtcWhipWhepAsync,
+      showStatus: (message) => console.debug('SRS stream status:', message),
+      logger: console,
+    }),
+  })
 }
 
-function initStreamController() {
+async function discoverActiveStream({ signal }) {
+  const response = await fetch(ACTIVE_STREAM_URL, { method: 'GET', signal })
+  if (!response.ok) {
+    throw new Error(`获取活动流 ID 失败：HTTP ${response.status}`)
+  }
+  const body = await response.json()
+  if (!body?.ok) {
+    throw new Error(body?.message || '活动流接口返回失败')
+  }
+  const streamId = body?.stream?.av_stream_id
+  return typeof streamId === 'string' || typeof streamId === 'number'
+    ? String(streamId).trim()
+    : ''
+}
+
+async function probeConnection(_candidate, { signal }) {
+  const response = await fetch(SRS_API_URL, { method: 'GET', signal })
+  return response.ok
+}
+
+function buildWhepUrl(streamId) {
+  return `${WHEP_BASE_URL}${encodeURIComponent(streamId)}`
+}
+
+function persistWhepUrl(whepUrl) {
+  return window.electronAPI.saveConfig({
+    whep_url: whepUrl,
+    last_updated: new Date().toISOString(),
+  })
+}
+
+function reportAutoConnectProgress(snapshot) {
+  if (snapshot.error) {
+    console.warn('Automatic access attempt failed:', snapshot.error)
+  }
+  window.electronAPI.reportAutoConnectProgress(snapshot)
+}
+
+function initAutomaticAccess() {
   try {
-    streamController = window.createSrsStreamController({
-      video,
-      showStatus: showSubtitle,
-      getSdkCtor: () => window.SrsRtcWhipWhepAsync,
-      logger: console,
-      playTimeoutMs: 10000,
-      mediaReadyTimeoutMs: 10000,
-      onConnectionFailed: () => {
-        if (returningToSetup) {
-          return
-        }
-        returningToSetup = true
-        showSubtitle('SRS 连接失败，请重新设置投流地址')
-        window.electronAPI.openSetupWindow().catch((error) => {
-          returningToSetup = false
-          console.error('Failed to open SRS setup window:', error)
-          showSubtitle(`Failed to open SRS setup window: ${error.message}`)
-        })
-      },
-    })
+    streamManager = createStreamManager()
+    window.__openLlmVtuberStageReady = true
     window.__openLlmVtuberStreamControllerReady = true
+
+    autoConnectController = window.createAutoConnectController({
+      discoverActiveStream,
+      probeConnection,
+      buildWhepUrl,
+      clearConfig: () => persistWhepUrl(''),
+      saveConfig: persistWhepUrl,
+      streamManager,
+      showMain: () => window.electronAPI.showMainWindow(),
+      showSetup: () => window.electronAPI.showAutoConnectWindow(),
+      onProgress: reportAutoConnectProgress,
+    })
+    unsubscribeRestart = window.electronAPI.onRestartAutoConnect(() => {
+      autoConnectController.restart().catch((error) => {
+        console.error('Automatic access restart failed:', error)
+      })
+    })
+    autoConnectController.start().catch((error) => {
+      console.error('Automatic access startup failed:', error)
+    })
   } catch (error) {
-    console.error('SRS stream controller initialization failed:', error)
-    showSubtitle(`SRS stream controller failed: ${error.message}`)
+    console.error('Automatic access initialization failed:', error)
+    reportAutoConnectProgress({
+      round: 0,
+      phase: 'retrying',
+      error: error?.message || String(error),
+    })
   }
 }
 
@@ -78,23 +135,7 @@ function scheduleWsReconnect() {
 
 function handleConnectWsError(error) {
   console.error('WebSocket setup failed:', error)
-  showSubtitle(`WebSocket setup failed: ${error.message}`)
   scheduleWsReconnect()
-}
-
-function handleStreamStartupError(error) {
-  console.error('SRS stream startup failed:', error)
-  showSubtitle(`SRS stream startup failed: ${error.message}`)
-}
-
-async function startConfiguredStream(config, previousWhepUrl) {
-  if (!streamController || !config.whep_url) {
-    return
-  }
-  if (config.whep_url === previousWhepUrl) {
-    return
-  }
-  await streamController.start(config.whep_url)
 }
 
 async function connectWs() {
@@ -102,15 +143,7 @@ async function connectWs() {
     return
   }
 
-  const [config, wsUrl] = await Promise.all([
-    window.electronAPI.getConfig(),
-    window.electronAPI.getWsUrl(),
-  ])
-  const previousWhepUrl = cachedConfig?.whep_url
-  cachedConfig = config
-
-  startConfiguredStream(config, previousWhepUrl).catch(handleStreamStartupError)
-
+  const wsUrl = await window.electronAPI.getWsUrl()
   ws = new WebSocket(wsUrl)
   const socket = ws
 
@@ -118,23 +151,23 @@ async function connectWs() {
     console.log('WebSocket connected to Python backend')
   }
 
-  socket.onmessage = (ev) => {
-    let msg
+  socket.onmessage = (event) => {
+    let message
     try {
-      msg = JSON.parse(ev.data)
+      message = JSON.parse(event.data)
     } catch {
       return
     }
 
-    switch (msg.type) {
+    switch (message.type) {
       case 'display-text':
-        if (msg.display_text?.text) showSubtitle(msg.display_text.text)
+        if (message.display_text?.text) showSubtitle(message.display_text.text)
         break
       case 'conversation-chain-start':
         console.log('[conversation-chain-start]')
         break
       case 'control':
-        if (msg.text === 'conversation-chain-start') {
+        if (message.text === 'conversation-chain-start') {
           console.log('[conversation-chain-start]')
         }
         break
@@ -142,13 +175,13 @@ async function connectWs() {
         console.log('[backend-synth-complete]')
         break
       case 'full-text':
-        console.log('[full-text]', msg.text)
+        console.log('[full-text]', message.text)
         break
       case 'set-conf':
-        console.log('[conf]', msg.conf_name, msg.conf_uid)
+        console.log('[conf]', message.conf_name, message.conf_uid)
         break
       case 'error':
-        console.error('[backend error]', msg.message)
+        console.error('[backend error]', message.message)
         break
       default:
         break
@@ -156,7 +189,6 @@ async function connectWs() {
   }
 
   socket.onerror = (error) => console.error('WebSocket error:', error)
-
   socket.onclose = () => {
     if (ws === socket) {
       ws = null
@@ -167,14 +199,19 @@ async function connectWs() {
 }
 
 window.addEventListener('beforeunload', () => {
-  if (streamController) {
-    streamController.close()
+  clearTimeout(subtitleTimer)
+  clearTimeout(wsReconnectTimer)
+  if (typeof unsubscribeRestart === 'function') {
+    unsubscribeRestart()
   }
-  if (stage) {
-    stage.dispose()
+  autoConnectController?.stop()
+  streamManager?.dispose()
+  if (ws) {
+    ws.onclose = null
+    ws.close()
+    ws = null
   }
 })
 
-initThreeStage()
-initStreamController()
+initAutomaticAccess()
 connectWs().catch(handleConnectWsError)

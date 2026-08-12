@@ -2,26 +2,40 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>配置数字人连接</title>
+  <title>数字人自动接入</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="setup-body">
   <div class="setup-container">
-    <h2>配置数字人连接</h2>
-    <p class="hint">输入 SRS WHEP 拉流地址，后续启动将自动连接</p>
-    <input
-      type="text"
-      id="whep-url"
-      placeholder="http://localhost:1985/rtc/v1/whep/?app=live&stream=avatar"
-    />
-    <div class="btn-row">
-      <button id="btn-latest">获取最新id</button>
-      <button id="btn-test">连接测试</button>
-      <button id="btn-confirm" disabled>确认保存</button>
+    <div class="access-header">
+      <div>
+        <h2>数字人自动接入</h2>
+        <p class="hint">正在实时发现并预加载数字人画面</p>
+      </div>
+      <span class="round-pill">第 <strong id="detection-round">0</strong> 轮</span>
     </div>
-    <p id="status"></p>
+    <div class="access-grid">
+      <section class="access-card">
+        <div class="access-card-heading">
+          <span>活动流 ID</span>
+          <span id="discovery-status" class="status-badge waiting">等待检测</span>
+        </div>
+        <code id="active-stream-id">尚未发现</code>
+      </section>
+      <section class="access-card">
+        <div class="access-card-heading">
+          <span>SRS 连接测试</span>
+          <span id="probe-status" class="status-badge waiting">等待 ID</span>
+        </div>
+        <span class="access-detail">HTTP 2xx 可达性检测</span>
+      </section>
+    </div>
+    <div class="access-footer">
+      <p id="access-phase">正在准备自动检测…</p>
+      <p id="access-countdown"></p>
+      <p id="access-error" hidden></p>
+    </div>
   </div>
-  <script src="setup_probe.js"></script>
   <script src="setup.js"></script>
 </body>
 </html>

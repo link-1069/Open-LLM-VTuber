@@ -365,6 +365,7 @@ test('notifies connection failure when video playback never settles', async () =
 test('retries when an established peer connection fails later', async () => {
   const timers = createTimers()
   const instances = []
+  const failures = []
 
   class DisconnectingSdk {
     constructor() {
@@ -393,6 +394,7 @@ test('retries when an established peer connection fails later', async () => {
     logger: { log() {}, warn() {}, error() {} },
     setTimeoutFn: timers.setTimeoutFn,
     clearTimeoutFn: timers.clearTimeoutFn,
+    onConnectionFailed: ({ error }) => failures.push(error.message),
   })
 
   await controller.start('http://example.test/rtc/v1/whep/?app=live&stream=a')
@@ -400,14 +402,93 @@ test('retries when an established peer connection fails later', async () => {
   instances[0].pc.onconnectionstatechange()
 
   assert.equal(instances[0].closed, true)
+  assert.match(failures[0], /pc=failed/)
   assert.equal(timers.scheduled.length, 1)
   assert.equal(timers.scheduled[0].delay, 5000)
+})
+
+test('waits three seconds before reporting a persistent disconnected state', async () => {
+  const timers = createTimers()
+  const failures = []
+  let instance
+
+  class DisconnectingSdk {
+    constructor() {
+      this.stream = { getTracks: () => [] }
+      this.pc = {
+        connectionState: 'connected',
+        iceConnectionState: 'connected',
+      }
+      instance = this
+    }
+
+    async play() { return { sessionid: 'session-a' } }
+    close() {}
+  }
+
+  const controller = createSrsStreamController({
+    video: { play: async () => {} },
+    showStatus: () => {},
+    getSdkCtor: () => DisconnectingSdk,
+    logger: { log() {}, warn() {}, error() {} },
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+    disconnectGraceMs: 3000,
+    autoRetry: false,
+    onConnectionFailed: ({ error }) => failures.push(error.message),
+  })
+
+  await controller.start('http://example.test/rtc/v1/whep/?app=live&stream=a')
+  instance.pc.connectionState = 'disconnected'
+  instance.pc.onconnectionstatechange()
+
+  assert.equal(failures.length, 0)
+  assert.equal(timers.scheduled.at(-1).delay, 3000)
+
+  timers.scheduled.at(-1).fn()
+
+  assert.match(failures[0], /pc=disconnected/)
+})
+
+test('reports an ended media track immediately', async () => {
+  const failures = []
+  let endTrack
+
+  class TrackEndingSdk {
+    constructor() {
+      this.stream = {
+        getTracks: () => [{
+          addEventListener(event, callback) {
+            if (event === 'ended') endTrack = callback
+          },
+        }],
+      }
+    }
+
+    async play() { return { sessionid: 'session-a' } }
+    close() {}
+  }
+
+  const controller = createSrsStreamController({
+    video: { play: async () => {} },
+    showStatus: () => {},
+    getSdkCtor: () => TrackEndingSdk,
+    logger: { log() {}, warn() {}, error() {} },
+    autoRetry: false,
+    onConnectionFailed: ({ error }) => failures.push(error.message),
+  })
+
+  await controller.start('http://example.test/rtc/v1/whep/?app=live&stream=a')
+  endTrack()
+
+  assert.deepEqual(failures, ['track ended'])
 })
 
 test('handles SDK constructor errors by reporting status and scheduling retry', async () => {
   const timers = createTimers()
   const messages = []
   const errors = []
+  const failures = []
 
   class ThrowingSdk {
     constructor() {
@@ -422,12 +503,30 @@ test('handles SDK constructor errors by reporting status and scheduling retry', 
     logger: { log() {}, warn() {}, error(message, error) { errors.push([message, error.message]) } },
     setTimeoutFn: timers.setTimeoutFn,
     clearTimeoutFn: timers.clearTimeoutFn,
+    onConnectionFailed: ({ error }) => failures.push(error.message),
   })
 
   await assert.doesNotReject(() => controller.start('http://example.test/rtc/v1/whep/?app=live&stream=a'))
 
   assert.deepEqual(messages, ['SRS stream initialization failed'])
   assert.deepEqual(errors, [['SRS stream initialization failed:', 'constructor failed']])
+  assert.deepEqual(failures, ['constructor failed'])
   assert.equal(timers.scheduled.length, 1)
   assert.equal(timers.scheduled[0].delay, 5000)
+})
+
+test('reports a connection failure when the SRS SDK is unavailable', async () => {
+  const failures = []
+  const controller = createSrsStreamController({
+    video: { play: async () => {} },
+    showStatus: () => {},
+    getSdkCtor: () => undefined,
+    logger: { log() {}, warn() {}, error() {} },
+    autoRetry: false,
+    onConnectionFailed: ({ error }) => failures.push(error.message),
+  })
+
+  await controller.start('http://example.test/rtc/v1/whep/?app=live&stream=a')
+
+  assert.deepEqual(failures, ['SRS SDK is not available'])
 })

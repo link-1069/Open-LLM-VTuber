@@ -1,128 +1,108 @@
-const urlInput  = document.getElementById('whep-url')
-const btnLatest = document.getElementById('btn-latest')
-const btnTest   = document.getElementById('btn-test')
-const btnConfirm = document.getElementById('btn-confirm')
-const statusEl  = document.getElementById('status')
-let verifiedUrl = ''
+'use strict'
 
-function setStatus(msg, type) {
-  statusEl.textContent = msg
-  statusEl.className = type || ''
+const roundEl = document.getElementById('detection-round')
+const discoveryEl = document.getElementById('discovery-status')
+const streamIdEl = document.getElementById('active-stream-id')
+const probeEl = document.getElementById('probe-status')
+const phaseEl = document.getElementById('access-phase')
+const errorEl = document.getElementById('access-error')
+const countdownEl = document.getElementById('access-countdown')
+
+let deadlineAt = 0
+let deadlineLabel = ''
+
+function setBadge(element, text, state) {
+  element.textContent = text
+  element.className = `status-badge ${state}`
 }
 
-async function prefillSavedConfig() {
-  try {
-    const config = await window.electronAPI.getConfig()
-    if (config?.whep_url) {
-      urlInput.value = config.whep_url
-      verifiedUrl = ''
-      btnConfirm.disabled = true
-    }
-  } catch (e) {
-    setStatus(`读取配置失败: ${e.message}`, 'err')
-  }
+function setError(message) {
+  errorEl.textContent = message || ''
+  errorEl.hidden = !message
 }
 
-btnLatest.addEventListener('click', async () => {
-  setStatus('正在获取最新 id...')
-  verifiedUrl = ''
-  btnLatest.disabled = true
-  btnConfirm.disabled = true
-  try {
-    const resp = await fetch('http://localhost:8500/api/active-streams', { method: 'GET' })
-    if (!resp.ok) {
-      setStatus(`获取最新 id 失败: HTTP ${resp.status}`, 'err')
-      return
-    }
-
-    const body = await resp.json()
-    if (!body?.ok) {
-      setStatus('获取最新 id 失败: 接口返回不可用', 'err')
-      return
-    }
-
-    const whepUrl = window.setupProbe.getWhepUrlFromStreamId(body?.stream?.av_stream_id)
-    if (!whepUrl) {
-      setStatus('获取最新 id 失败: 未找到 stream id', 'err')
-      return
-    }
-
-    urlInput.value = whepUrl
-    setStatus('已获取最新 id，请先完成连接测试', 'ok')
-  } catch (e) {
-    setStatus(`获取最新 id 失败: ${e.message}`, 'err')
-  } finally {
-    btnLatest.disabled = false
-  }
-})
-
-btnTest.addEventListener('click', async () => {
-  const url = urlInput.value.trim()
-  if (!url) { setStatus('请输入地址', 'err'); return }
-  setStatus('测试中...')
-  verifiedUrl = ''
-  btnTest.disabled = true
-  btnConfirm.disabled = true
-  try {
-    const probeUrl = window.setupProbe.getSrsApiUrlFromWhepUrl(url)
-    if (!probeUrl) {
-      setStatus('✗ 地址格式无效', 'err')
-      btnConfirm.disabled = true
-      btnTest.disabled = false
-      return
-    }
-
-    // Check the SRS HTTP API instead of sending a fake SDP offer to WHEP.
-    const resp = await fetch(probeUrl, { method: 'GET' })
-    if (resp.ok) {
-      if (urlInput.value.trim() !== url) {
-        setStatus('输入已更改，请重新测试', 'err')
-        verifiedUrl = ''
-        btnConfirm.disabled = true
-        btnTest.disabled = false
-        return
-      }
-      setStatus('✓ 服务器可达', 'ok')
-      verifiedUrl = url
-      btnConfirm.disabled = false
-    } else {
-      setStatus(`✗ 服务器返回 HTTP ${resp.status}`, 'err')
-      btnConfirm.disabled = true
-    }
-  } catch (e) {
-    setStatus(`✗ 无法连接: ${e.message}`, 'err')
-    btnConfirm.disabled = true
-  }
-  btnTest.disabled = false
-})
-
-btnConfirm.addEventListener('click', async () => {
-  const url = urlInput.value.trim()
-  if (!url || url !== verifiedUrl) {
-    setStatus('请先完成连接测试', 'err')
+function updateCountdown() {
+  if (!deadlineAt || !deadlineLabel) {
+    countdownEl.textContent = ''
     return
   }
-  btnConfirm.disabled = true
-  try {
-    await window.electronAPI.saveConfig({
-      whep_url: url,
-      last_updated: new Date().toISOString(),
-    })
-    await window.electronAPI.openMainWindow()
-  } catch (e) {
-    setStatus(`保存或打开失败: ${e.message}`, 'err')
-    btnConfirm.disabled = false
+  const remainingSeconds = Math.ceil(Math.max(0, deadlineAt - Date.now()) / 1000)
+  const minutes = Math.floor(remainingSeconds / 60)
+  const seconds = remainingSeconds % 60
+  const formatted = minutes > 0
+    ? `${minutes} 分 ${String(seconds).padStart(2, '0')} 秒`
+    : `${remainingSeconds} 秒`
+  countdownEl.textContent = `${deadlineLabel}：剩余 ${formatted}`
+}
+
+function renderProgress(snapshot) {
+  roundEl.textContent = String(snapshot.round || 0)
+  if (Object.prototype.hasOwnProperty.call(snapshot, 'streamId')) {
+    streamIdEl.textContent = snapshot.streamId || '尚未发现'
+    streamIdEl.title = snapshot.streamId || ''
   }
-})
+  deadlineAt = snapshot.deadlineAt || 0
+  deadlineLabel = ''
+  setError(snapshot.error)
 
-// Allow pressing Enter in the input to trigger test
-urlInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') btnTest.click()
-})
+  switch (snapshot.phase) {
+    case 'discovering':
+      setBadge(discoveryEl, '检测中', 'running')
+      setBadge(probeEl, '等待 ID', 'waiting')
+      phaseEl.textContent = '正在获取活动流 ID…'
+      break
+    case 'probing':
+      setBadge(discoveryEl, '已获取', 'ok')
+      setBadge(probeEl, '测试中', 'running')
+      phaseEl.textContent = '正在测试 SRS HTTP 服务…'
+      break
+    case 'saving':
+      setBadge(discoveryEl, '已获取', 'ok')
+      setBadge(probeEl, '已连接', 'ok')
+      phaseEl.textContent = '正在保存已验证的连接…'
+      break
+    case 'connecting':
+      setBadge(discoveryEl, '已获取', 'ok')
+      setBadge(probeEl, '已连接', 'ok')
+      phaseEl.textContent = '正在建立 WHEP 连接…'
+      deadlineLabel = 'WHEP 建连'
+      break
+    case 'waiting-frame':
+      setBadge(discoveryEl, '持续检测', 'running')
+      setBadge(probeEl, '已连接', 'ok')
+      phaseEl.textContent = 'WHEP 已连接，正在等待数字人画面…'
+      deadlineLabel = '等待首帧'
+      break
+    case 'cooldown':
+      setBadge(discoveryEl, '已获取', 'ok')
+      setBadge(probeEl, '暂缓重试', 'waiting')
+      phaseEl.textContent = '该活动流正在冷却，继续实时检测…'
+      deadlineLabel = '冷却'
+      break
+    case 'active':
+      setBadge(discoveryEl, '持续检测', 'running')
+      setBadge(probeEl, '已连接', 'ok')
+      phaseEl.textContent = '数字人画面已就绪'
+      break
+    case 'clear-error':
+      setBadge(discoveryEl, '继续检测', 'running')
+      setBadge(probeEl, '等待 ID', 'waiting')
+      phaseEl.textContent = '旧配置清除失败，自动检测仍在继续'
+      break
+    default:
+      setBadge(discoveryEl, snapshot.streamId ? '已获取' : '重试中', snapshot.streamId ? 'ok' : 'error')
+      setBadge(probeEl, '等待重试', 'error')
+      phaseEl.textContent = '本轮未完成，下一秒自动重试'
+      deadlineLabel = '下一次检测'
+      break
+  }
+  updateCountdown()
+}
 
-urlInput.addEventListener('input', () => {
-  verifiedUrl = ''
-  btnConfirm.disabled = true
-})
+const unsubscribeProgress = window.electronAPI.onAutoConnectProgress(renderProgress)
+const countdownTimer = setInterval(updateCountdown, 250)
 
-prefillSavedConfig()
+window.addEventListener('beforeunload', () => {
+  clearInterval(countdownTimer)
+  unsubscribeProgress()
+})

@@ -159,7 +159,7 @@ test('creates a transparent Three.js stage and mounts the renderer canvas', () =
   })
 
   assert.equal(mount.children.length, 1)
-  assert.equal(mount.children[0].id, 'three-canvas')
+  assert.equal(mount.children[0].className, 'three-canvas')
   assert.deepEqual(fakeThree.calls.renderer.options, { alpha: true, antialias: true })
   assert.deepEqual(fakeThree.calls.renderer.clearColor, [0x000000, 0])
   assert.equal(fakeThree.calls.renderer.pixelRatio, 1.5)
