@@ -4,10 +4,11 @@ const fs = require('fs')
 const { spawn, spawnSync } = require('child_process')
 const { createPresentationController } = require('./presentation_controller')
 const { runPresentationExit } = require('./presentation_exit')
+const { createPresentationMenuTemplate } = require('./presentation_menu')
 const {
   buildStageMediaUrl,
+  createStageMediaTracker,
   getMediaSignature,
-  inspectStageMedia,
 } = require('./presentation_media')
 const {
   PRESENTATION_MODES,
@@ -24,6 +25,7 @@ const {
   constrainBoundsToWorkArea,
   hasMinimumVisibleArea,
   normalizeStoredBounds,
+  selectLatestDesktopBounds,
   validateBounds,
 } = require('./window_bounds')
 
@@ -43,13 +45,11 @@ let isQuitting = false
 let presentationController = null
 let pendingMainWindowBounds = null
 let stageMediaPollTimer = null
-let stageMediaPollInProgress = false
-let approvedMedia = null
-let failedMedia = null
 let nextMediaValidationId = 1
 let lastNonModalError = ''
 let quitConfirmationInProgress = false
 const pendingMediaValidations = new Map()
+const stageMediaTracker = createStageMediaTracker({ validate: requestMediaValidation })
 
 function getProjectRoot() {
   return app.isPackaged ? path.join(process.resourcesPath, 'app') : path.join(__dirname, '..')
@@ -225,15 +225,7 @@ function getConfiguredMediaPath() {
 }
 
 function getApprovedMediaDescriptor() {
-  const mediaPath = getConfiguredMediaPath()
-  if (!approvedMedia || approvedMedia.path !== mediaPath) {
-    return { media_available: false, media_type: getStageMediaType(mediaPath), media_url: '' }
-  }
-  return {
-    media_available: true,
-    media_type: approvedMedia.type,
-    media_url: approvedMedia.url,
-  }
+  return stageMediaTracker.getDescriptor(getConfiguredMediaPath())
 }
 
 function buildPresentationSnapshot(snapshot = presentationController?.getSnapshot()) {
@@ -301,20 +293,6 @@ function requestMediaValidation(mediaPath, stats) {
   })
 }
 
-async function validateAndApproveMedia(mediaPath, stats) {
-  const validation = await requestMediaValidation(mediaPath, stats)
-  if (!validation?.ok) return validation
-  const signature = getMediaSignature(stats)
-  approvedMedia = {
-    path: mediaPath,
-    signature,
-    type: getStageMediaType(mediaPath),
-    url: buildStageMediaUrl(mediaPath, signature),
-  }
-  failedMedia = null
-  return { ok: true }
-}
-
 function isStageMediaRelevant() {
   const snapshot = presentationController?.getSnapshot()
   return Boolean(
@@ -329,34 +307,9 @@ function isStageMediaRelevant() {
 }
 
 async function checkStageMedia() {
-  if (stageMediaPollInProgress || !isStageMediaRelevant()) return
-  stageMediaPollInProgress = true
-  try {
-    const mediaPath = getConfiguredMediaPath()
-    const inspection = inspectStageMedia(mediaPath, { failedMedia })
-    if (!inspection.available) {
-      if (inspection.reason === 'decode_failed') return
-      if (approvedMedia) {
-        approvedMedia = null
-        failedMedia = null
-        publishPresentationState()
-      }
-      return
-    }
-    const { signature, stats } = inspection
-    if (approvedMedia?.path === mediaPath && approvedMedia.signature === signature) return
-    const previousApprovedMedia = approvedMedia
-    const validation = await validateAndApproveMedia(mediaPath, stats)
-    if (validation.ok) {
-      publishPresentationState()
-    } else {
-      approvedMedia = previousApprovedMedia?.path === mediaPath ? previousApprovedMedia : null
-      failedMedia = { path: mediaPath, signature }
-      publishPresentationState()
-    }
-  } finally {
-    stageMediaPollInProgress = false
-  }
+  if (!isStageMediaRelevant()) return
+  const result = await stageMediaTracker.check(getConfiguredMediaPath())
+  if (result.changed) publishPresentationState()
 }
 
 function stopStageMediaPolling() {
@@ -566,25 +519,29 @@ async function setPresentationMode(mode) {
 }
 
 async function setStageBackgroundKind(kind) {
+  let approvedCandidate = null
   if (kind === STAGE_BACKGROUND_KINDS.MEDIA) {
     const mediaPath = getConfiguredMediaPath()
-    const inspection = inspectStageMedia(mediaPath, { failedMedia })
+    const inspection = stageMediaTracker.inspect(mediaPath)
     if (!inspection.available) {
       await showOperationError('设置舞台背景失败', new Error('已选媒体文件不可用'))
       return false
     }
     const { signature, stats } = inspection
+    const approvedMedia = stageMediaTracker.getApproved()
     if (approvedMedia?.path !== mediaPath || approvedMedia.signature !== signature) {
-      const validation = await validateAndApproveMedia(mediaPath, stats)
+      const validation = await stageMediaTracker.validateCandidate(mediaPath, stats)
       if (!validation.ok) {
-        failedMedia = { path: mediaPath, signature }
+        stageMediaTracker.markDecodeFailure(mediaPath, signature)
         await showOperationError('设置舞台背景失败', new Error(validation.error || '媒体文件无法解码'))
         return false
       }
+      approvedCandidate = validation.descriptor
     }
   }
   return runDiscretePresentationAction('设置舞台背景失败', async () => {
     const snapshot = presentationController.setBackgroundKind(kind)
+    if (approvedCandidate) stageMediaTracker.approve(approvedCandidate)
     publishPresentationState(snapshot)
   })
 }
@@ -605,24 +562,22 @@ async function chooseStageBackgroundMedia() {
     await showOperationError('舞台背景不可用', new Error('仅支持 PNG、JPG/JPEG、WebP、BMP、GIF 和 MP4。'))
     return false
   }
-  const inspection = inspectStageMedia(mediaPath)
+  const inspection = stageMediaTracker.inspect(mediaPath)
   if (!inspection.available) {
     await showOperationError('舞台背景不可用', new Error('所选媒体文件不可用'))
     return false
   }
   const { stats } = inspection
-  const previousApprovedMedia = approvedMedia
-  const validation = await validateAndApproveMedia(mediaPath, stats)
+  const validation = await stageMediaTracker.validateCandidate(mediaPath, stats)
   if (!validation.ok) {
-    approvedMedia = previousApprovedMedia
     await showOperationError('舞台背景不可用', new Error(validation.error || '媒体文件无法解码'))
     return false
   }
   const saved = await runDiscretePresentationAction('保存舞台背景失败', async () => {
     const snapshot = presentationController.selectMediaPath(mediaPath)
+    stageMediaTracker.approve(validation.descriptor)
     publishPresentationState(snapshot)
   })
-  if (!saved) approvedMedia = previousApprovedMedia
   return saved
 }
 
@@ -639,8 +594,7 @@ async function clearStageBackgroundMedia() {
   if (result.response !== 1) return false
   return runDiscretePresentationAction('清除舞台背景失败', async () => {
     const snapshot = presentationController.clearMediaPath()
-    approvedMedia = null
-    failedMedia = null
+    stageMediaTracker.clear()
     publishPresentationState(snapshot)
   })
 }
@@ -677,56 +631,22 @@ function beginStagePersonEditing() {
 function isConfiguredMediaAvailable() {
   const mediaPath = getConfiguredMediaPath()
   if (!mediaPath) return false
-  return inspectStageMedia(mediaPath, { failedMedia }).available
+  return stageMediaTracker.inspect(mediaPath).available
 }
 
 function buildMainWindowContextMenu() {
   const snapshot = presentationController.getSnapshot()
-  const mediaPath = snapshot.stage_background.media_path
-  const mediaName = mediaPath ? path.basename(mediaPath) : '未选择'
   const mediaAvailable = isConfiguredMediaAvailable()
-  return Menu.buildFromTemplate([
-    {
-      label: '桌面宠物模式',
-      type: 'radio',
-      checked: snapshot.presentation_mode === PRESENTATION_MODES.DESKTOP_PET,
-      click: () => setPresentationMode(PRESENTATION_MODES.DESKTOP_PET),
-    },
-    {
-      label: '全屏舞台模式',
-      type: 'radio',
-      checked: snapshot.presentation_mode === PRESENTATION_MODES.FULLSCREEN_STAGE,
-      click: () => setPresentationMode(PRESENTATION_MODES.FULLSCREEN_STAGE),
-    },
-    { type: 'separator' },
-    {
-      label: '舞台背景',
-      submenu: [
-        {
-          label: '透明背景',
-          type: 'radio',
-          checked: snapshot.stage_background.kind === STAGE_BACKGROUND_KINDS.TRANSPARENT,
-          click: () => setStageBackgroundKind(STAGE_BACKGROUND_KINDS.TRANSPARENT),
-        },
-        {
-          label: `使用已选媒体：${mediaName}${mediaPath && !mediaAvailable ? '（不可用）' : ''}`,
-          type: 'radio',
-          checked: snapshot.stage_background.kind === STAGE_BACKGROUND_KINDS.MEDIA,
-          enabled: Boolean(mediaPath && mediaAvailable),
-          click: () => setStageBackgroundKind(STAGE_BACKGROUND_KINDS.MEDIA),
-        },
-        { type: 'separator' },
-        { label: '选择本地媒体…', click: chooseStageBackgroundMedia },
-        { label: '清除已选媒体…', enabled: Boolean(mediaPath), click: clearStageBackgroundMedia },
-      ],
-    },
-    { label: '编辑人物大小和位置…', click: beginStagePersonEditing },
-    { label: '恢复默认人物布局…', click: resetStagePersonLayout },
-    { type: 'separator' },
-    { label: '重新检测连接', click: restartAutomaticAccess },
-    { type: 'separator' },
-    { label: '退出应用…', click: requestApplicationQuit },
-  ])
+  return Menu.buildFromTemplate(createPresentationMenuTemplate(snapshot, mediaAvailable, {
+    setMode: setPresentationMode,
+    setBackgroundKind: setStageBackgroundKind,
+    chooseMedia: chooseStageBackgroundMedia,
+    clearMedia: clearStageBackgroundMedia,
+    editPerson: beginStagePersonEditing,
+    resetPerson: resetStagePersonLayout,
+    restart: { label: '重新检测连接', click: restartAutomaticAccess },
+    quit: requestApplicationQuit,
+  }))
 }
 
 async function requestApplicationQuit() {
@@ -985,10 +905,7 @@ app.whenReady().then(() => {
   })
   ipcMain.on('stage-media-render-failure', (event, payload) => {
     assertMainWindowSender(event)
-    if (payload?.media_url !== approvedMedia?.url) return
-    failedMedia = { path: approvedMedia.path, signature: approvedMedia.signature }
-    approvedMedia = null
-    publishPresentationState()
+    if (stageMediaTracker.markRenderFailure(payload?.media_url)) publishPresentationState()
   })
   ipcMain.handle('show-main-window', (event) => {
     assertMainWindowSender(event)
@@ -1011,13 +928,18 @@ app.whenReady().then(() => {
 
   screen.on('display-removed', (_event, display) => {
     const config = normalizeConfig(readConfig())
-    if (config.window_bounds && !hasMinimumVisibleArea(
-      config.window_bounds,
+    const latestDesktopBounds = selectLatestDesktopBounds(
+      pendingMainWindowBounds,
+      presentationController?.getSnapshot().desktop_bounds,
+      config.window_bounds
+    )
+    if (latestDesktopBounds && !hasMinimumVisibleArea(
+      latestDesktopBounds,
       getDisplayWorkAreas(),
       MIN_VISIBLE_SIZE
     )) {
       const corrected = constrainBoundsToWorkArea(
-        config.window_bounds,
+        latestDesktopBounds,
         screen.getPrimaryDisplay().workArea,
         MIN_VISIBLE_SIZE
       )

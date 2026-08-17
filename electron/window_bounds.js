@@ -108,6 +108,10 @@ function centerBoundsInWorkArea(size, workArea) {
   }
 }
 
+function selectLatestDesktopBounds(pendingBounds, controllerBounds, storedBounds) {
+  return pendingBounds || controllerBounds || storedBounds || null
+}
+
 const windowBoundsAPI = {
   DEFAULT_WINDOW_SIZE,
   MIN_VISIBLE_SIZE,
@@ -120,6 +124,7 @@ const windowBoundsAPI = {
   hasMinimumVisibleArea,
   normalizeStoredBounds,
   parseBoundsInput,
+  selectLatestDesktopBounds,
   validateBounds,
 }
 

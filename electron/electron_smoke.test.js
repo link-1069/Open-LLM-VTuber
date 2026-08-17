@@ -134,6 +134,7 @@ test('automatically discovers, renders, saves, and shows a digital human stream'
       'digital_human_stream_manager.js',
       'auto_connect.js',
       '../window_bounds.js',
+      '../presentation_contract.js',
       '../presentation_layout.js',
       'window_controls.js',
       'stage_view.js',

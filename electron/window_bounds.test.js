@@ -12,6 +12,7 @@ const {
   hasMinimumVisibleArea,
   normalizeStoredBounds,
   parseBoundsInput,
+  selectLatestDesktopBounds,
   validateBounds,
 } = require('./window_bounds')
 
@@ -91,4 +92,14 @@ test('centers the default window size in a display work area', () => {
     centerBoundsInWorkArea(DEFAULT_WINDOW_SIZE, { x: 1920, y: 0, width: 2560, height: 1400 }),
     { x: 2960, y: 300, width: 480, height: 800 }
   )
+})
+
+test('display recovery prefers pending desktop bounds over controller and stored values', () => {
+  const pending = { x: 3000, y: 20, width: 480, height: 800 }
+  const controller = { x: 2000, y: 20, width: 480, height: 800 }
+  const stored = { x: 100, y: 20, width: 480, height: 800 }
+
+  assert.equal(selectLatestDesktopBounds(pending, controller, stored), pending)
+  assert.equal(selectLatestDesktopBounds(null, controller, stored), controller)
+  assert.equal(selectLatestDesktopBounds(null, null, stored), stored)
 })

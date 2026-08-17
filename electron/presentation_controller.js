@@ -33,6 +33,7 @@ function createPresentationController(options) {
       effective_mode: effectiveMode,
       previewing_stage: previewingStage,
       editing_person: editingPerson,
+      desktop_bounds: { ...desktopBounds },
       stage_background: { ...config.stage_background },
       stage_person_layout: { ...config.stage_person_layout },
     }
@@ -147,7 +148,6 @@ function createPresentationController(options) {
     }
     if (effectiveMode === PRESENTATION_MODES.DESKTOP_PET) {
       desktopBounds = windowAdapter.getBounds()
-      previewingStage = true
       applyStageWindow(getStageDisplay())
       previewingStage = true
     }

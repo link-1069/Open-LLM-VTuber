@@ -5,6 +5,7 @@ const path = require('node:path')
 
 const htmlPath = path.join(__dirname, 'main.html')
 const mainProcessPath = path.join(__dirname, '..', 'main.js')
+const presentationMenuPath = path.join(__dirname, '..', 'presentation_menu.js')
 const preloadPath = path.join(__dirname, '..', 'preload.js')
 const rendererScriptPath = path.join(__dirname, 'renderer.js')
 const windowControlsScriptPath = path.join(__dirname, 'window_controls.js')
@@ -30,6 +31,7 @@ test('loads Three.js and renderer modules before the main renderer', () => {
     'digital_human_stream_manager.js',
     'auto_connect.js',
     '../window_bounds.js',
+    '../presentation_contract.js',
     '../presentation_layout.js',
     'window_controls.js',
     'stage_view.js',
@@ -69,27 +71,27 @@ test('ships the local Three.js browser build used by the main window', () => {
 
 test('main window context menu can restart automatic connection detection', () => {
   const script = fs.readFileSync(mainProcessPath, 'utf8')
-  const menuItemIndex = script.indexOf("label: '重新检测连接'")
-  const restartIndex = script.indexOf('click: restartAutomaticAccess', menuItemIndex)
+  const menuScript = fs.readFileSync(presentationMenuPath, 'utf8')
 
   assert.match(script, /const \{ app, BrowserWindow, dialog, ipcMain, Menu, screen \} = require\('electron'\)/)
   assert.match(script, /mainWindow\.webContents\.on\('context-menu'/)
-  assert.notEqual(menuItemIndex, -1)
-  assert.notEqual(restartIndex, -1)
+  assert.match(script, /restart: \{ label: '重新检测连接', click: restartAutomaticAccess \}/)
+  assert.match(menuScript, /\{ \.\.\.actions\.restart \}/)
   assert.match(script, /function restartAutomaticAccess\(\) \{[\s\S]*showAutoConnectWindow\(\)[\s\S]*sendToMainWindow\('restart-auto-connect'\)/)
 })
 
 test('main window exposes both presentation modes, stage controls, and a unified exit action', () => {
   const html = fs.readFileSync(htmlPath, 'utf8')
   const mainScript = fs.readFileSync(mainProcessPath, 'utf8')
+  const menuScript = fs.readFileSync(presentationMenuPath, 'utf8')
   const preloadScript = fs.readFileSync(preloadPath, 'utf8')
   const rendererScript = fs.readFileSync(rendererScriptPath, 'utf8')
 
-  assert.match(mainScript, /label: '桌面宠物模式'/)
-  assert.match(mainScript, /label: '全屏舞台模式'/)
-  assert.match(mainScript, /label: '舞台背景'/)
-  assert.match(mainScript, /label: '编辑人物大小和位置…'/)
-  assert.match(mainScript, /label: '退出应用…'/)
+  assert.match(menuScript, /label: '桌面宠物模式'/)
+  assert.match(menuScript, /label: '全屏舞台模式'/)
+  assert.match(menuScript, /label: '舞台背景'/)
+  assert.match(menuScript, /label: '编辑人物大小和位置…'/)
+  assert.match(menuScript, /label: '退出应用…'/)
   assert.match(mainScript, /setAlwaysOnTop\(true, 'screen-saver'\)/)
   assert.match(preloadScript, /getPresentationState:/)
   assert.match(preloadScript, /saveStagePersonLayout:/)

@@ -2,15 +2,19 @@
   const layoutAPI = typeof module !== 'undefined' && module.exports
     ? require('../presentation_layout')
     : root.presentationLayout
-  const api = factory(layoutAPI)
+  const contractAPI = typeof module !== 'undefined' && module.exports
+    ? require('../presentation_contract')
+    : root.presentationContract
+  const api = factory(layoutAPI, contractAPI)
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api
   }
   root.createStageView = api.createStageView
-})(typeof globalThis !== 'undefined' ? globalThis : window, function (layoutAPI) {
+})(typeof globalThis !== 'undefined' ? globalThis : window, function (layoutAPI, contractAPI) {
   'use strict'
 
   const { calculateStagePersonFrame } = layoutAPI
+  const { PRESENTATION_MODES, STAGE_BACKGROUND_KINDS } = contractAPI
 
   function createStageView(options) {
     const documentObject = options.document
@@ -43,7 +47,7 @@
 
     function applyPersonFrame() {
       if (!snapshot) return
-      if (snapshot.effective_mode !== 'fullscreen_stage') {
+      if (snapshot.effective_mode !== PRESENTATION_MODES.FULLSCREEN_STAGE) {
         slots.forEach((slot) => {
           Object.assign(slot.layer.style, {
             left: '0',
@@ -93,8 +97,8 @@
     }
 
     function applyBackground() {
-      const shouldShowMedia = snapshot?.effective_mode === 'fullscreen_stage' &&
-        snapshot.stage_background?.kind === 'media' &&
+      const shouldShowMedia = snapshot?.effective_mode === PRESENTATION_MODES.FULLSCREEN_STAGE &&
+        snapshot.stage_background?.kind === STAGE_BACKGROUND_KINDS.MEDIA &&
         snapshot.media_available !== false &&
         Boolean(snapshot.media_url)
       if (!shouldShowMedia) {

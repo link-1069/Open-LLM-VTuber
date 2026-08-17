@@ -247,6 +247,7 @@ test('desktop bounds can be refreshed without accepting fullscreen bounds', asyn
   const movedBounds = { x: 200, y: 80, width: 600, height: 900 }
   harness.windowAdapter.bounds = movedBounds
   harness.controller.updateDesktopBounds(movedBounds)
+  assert.deepEqual(harness.controller.getSnapshot().desktop_bounds, movedBounds)
   await harness.controller.setMode('fullscreen_stage')
 
   assert.deepEqual(harness.getStoredConfig().window_bounds, {
@@ -256,6 +257,7 @@ test('desktop bounds can be refreshed without accepting fullscreen bounds', asyn
     height: 900,
   })
   harness.controller.updateDesktopBounds({ x: 0, y: 0, width: 1920, height: 1080 })
+  assert.deepEqual(harness.controller.getSnapshot().desktop_bounds, movedBounds)
   await harness.controller.setMode('desktop_pet')
   assert.deepEqual(harness.windowAdapter.bounds, { x: 200, y: 80, width: 600, height: 900 })
 })
