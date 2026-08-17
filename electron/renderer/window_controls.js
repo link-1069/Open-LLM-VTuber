@@ -184,9 +184,15 @@ function initializeWindowControls(windowObject, documentObject) {
     updateFields(bounds, true)
   })
   const unsubscribeSaveStatus = electronAPI.onMainWindowSaveStatus(applySaveStatus)
+  const unsubscribePresentation = electronAPI.onPresentationStateChanged
+    ? electronAPI.onPresentationStateChanged((snapshot) => {
+        if (snapshot?.effective_mode === 'fullscreen_stage') setPanelOpen(false)
+      })
+    : function () {}
   windowObject.addEventListener('beforeunload', () => {
     unsubscribeBounds()
     unsubscribeSaveStatus()
+    unsubscribePresentation()
   })
 
   refreshState()

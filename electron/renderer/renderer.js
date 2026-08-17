@@ -4,28 +4,65 @@ const ACTIVE_STREAM_URL = 'http://localhost:8500/api/active-streams'
 const SRS_API_URL = 'http://127.0.0.1:1985/api/v1'
 const WHEP_BASE_URL = 'http://127.0.0.1:1985/rtc/v1/whep/?app=live&stream='
 
-const subtitle = document.getElementById('subtitle')
 const slots = [0, 1].map((index) => ({
   layer: document.getElementById(`stream-layer-${index}`),
   mount: document.getElementById(`stage-${index}`),
   video: document.getElementById(`video-${index}`),
 }))
 
-let subtitleTimer = null
 let ws = null
 let wsReconnectTimer = null
 let streamManager = null
 let autoConnectController = null
 let unsubscribeRestart = null
+let unsubscribePresentation = null
+let unsubscribeMediaValidation = null
+let unsubscribeNotification = null
+let notificationTimer = null
+let stageView = null
 
 window.__openLlmVtuberStageReady = false
 window.__openLlmVtuberStreamControllerReady = false
+window.__openLlmVtuberPresentationReady = false
 
-function showSubtitle(text) {
-  subtitle.textContent = text
-  subtitle.style.display = 'block'
-  clearTimeout(subtitleTimer)
-  subtitleTimer = setTimeout(() => { subtitle.style.display = 'none' }, 5000)
+function showNonModalNotification(notification) {
+  const element = document.getElementById('non-modal-notification')
+  if (!element || !notification?.message) return
+  element.textContent = notification.message
+  element.hidden = false
+  clearTimeout(notificationTimer)
+  notificationTimer = setTimeout(() => {
+    element.hidden = true
+  }, 5000)
+}
+
+function initPresentation() {
+  stageView = window.createStageView({
+    document,
+    window,
+    slots,
+    electronAPI: window.electronAPI,
+  })
+  unsubscribePresentation = window.electronAPI.onPresentationStateChanged((snapshot) => {
+    stageView.applyPresentationState(snapshot)
+  })
+  unsubscribeMediaValidation = window.electronAPI.onValidateStageMedia((request) => {
+    stageView.validateMedia(request)
+      .then((result) => window.electronAPI.resolveStageMediaValidation({
+        request_id: request.request_id,
+        ...result,
+      }))
+      .catch((error) => window.electronAPI.resolveStageMediaValidation({
+        request_id: request.request_id,
+        ok: false,
+        error: error?.message || String(error),
+      }))
+  })
+  unsubscribeNotification = window.electronAPI.onNonModalNotification(showNonModalNotification)
+  window.electronAPI.getPresentationState()
+    .then((snapshot) => stageView.applyPresentationState(snapshot))
+    .catch((error) => console.error('Presentation initialization failed:', error))
+  window.__openLlmVtuberPresentationReady = true
 }
 
 function createStreamManager() {
@@ -160,9 +197,6 @@ async function connectWs() {
     }
 
     switch (message.type) {
-      case 'display-text':
-        if (message.display_text?.text) showSubtitle(message.display_text.text)
-        break
       case 'conversation-chain-start':
         console.log('[conversation-chain-start]')
         break
@@ -199,11 +233,15 @@ async function connectWs() {
 }
 
 window.addEventListener('beforeunload', () => {
-  clearTimeout(subtitleTimer)
+  clearTimeout(notificationTimer)
   clearTimeout(wsReconnectTimer)
   if (typeof unsubscribeRestart === 'function') {
     unsubscribeRestart()
   }
+  unsubscribePresentation?.()
+  unsubscribeMediaValidation?.()
+  unsubscribeNotification?.()
+  stageView?.dispose()
   autoConnectController?.stop()
   streamManager?.dispose()
   if (ws) {
@@ -213,5 +251,6 @@ window.addEventListener('beforeunload', () => {
   }
 })
 
+initPresentation()
 initAutomaticAccess()
 connectWs().catch(handleConnectWsError)

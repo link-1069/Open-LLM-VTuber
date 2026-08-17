@@ -1,4 +1,16 @@
-# Desktop Window Controls
+# Electron Desktop
+
+## Presentation modes
+
+Right-click the main display window to switch between **桌面宠物模式** and **全屏舞台模式**. Both modes are borderless and use Electron's high-level always-on-top behavior. Fullscreen stage covers the complete display containing the desktop pet, including the taskbar; return to desktop-pet mode before moving the stage to another display.
+
+The **舞台背景** submenu can keep the stage transparent or reference a local PNG, JPG/JPEG, WebP, BMP, GIF, or MP4 file. Media remains at its original path, uses centered `cover`, and is decoded before a selection is saved. MP4 files autoplay silently and loop. Missing saved media falls back to transparency and is checked every three seconds while the fullscreen media background is relevant. Clearing the selected path requires confirmation.
+
+Select **编辑人物大小和位置…** to open the visual editor. Drag the visible frame to move the person and use the mouse wheel over the frame to scale it. Only **保存** persists the relative layout; **取消** restores the last saved layout. Starting the editor from desktop-pet mode uses a temporary fullscreen preview and returns to the desktop pet after either action.
+
+Presentation mode, background selection, and person layout are saved immediately. Every application exit entry point asks for confirmation and performs a final desktop-bounds save check.
+
+## Desktop window controls
 
 The Electron main display window includes a hidden window-control panel for positioning and sizing the desktop avatar.
 
@@ -18,7 +30,7 @@ The panel displays `x`, `y`, `width`, and `height` in Electron logical pixels (D
 - At least `50×50px` of the window must remain visible on a connected display.
 - Invalid values leave the window unchanged and display an error next to the affected field.
 
-Changes made through the panel are saved immediately. Moving or resizing the window directly is saved approximately 300 ms after the operation stops. The saved bounds are shared across all WHEP connections and restored the next time the main display window opens.
+Changes made through the panel are saved immediately. Moving or resizing the window directly is saved approximately three seconds after the operation stops. The saved desktop-pet bounds are shared across all WHEP connections and restored independently of fullscreen-stage bounds the next time the main display window opens.
 
 If the saved bounds are outside the current display layout, the application moves the window back into the primary display's work area and saves the corrected position.
 

@@ -1,7 +1,15 @@
-const { app, BrowserWindow, ipcMain, Menu, screen } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, screen } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const { pathToFileURL } = require('url')
 const { spawn, spawnSync } = require('child_process')
+const { createPresentationController } = require('./presentation_controller')
+const {
+  PRESENTATION_MODES,
+  STAGE_BACKGROUND_KINDS,
+  getStageMediaType,
+  normalizeConfig,
+} = require('./presentation_state')
 const {
   DEFAULT_WINDOW_SIZE,
   MIN_VISIBLE_SIZE,
@@ -16,7 +24,9 @@ const {
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json')
 const SERVER_PORT = 12393
-const WINDOW_BOUNDS_SAVE_DELAY_MS = 300
+const WINDOW_BOUNDS_SAVE_DELAY_MS = 3000
+const STAGE_MEDIA_POLL_INTERVAL_MS = 3000
+const STAGE_MEDIA_VALIDATION_TIMEOUT_MS = 12000
 
 let mainWindow = null
 let setupWindow = null
@@ -25,6 +35,16 @@ let mainWindowBoundsSaveTimer = null
 let mainWindowSaveStatus = { state: 'saved' }
 let latestAutoConnectProgress = null
 let isQuitting = false
+let presentationController = null
+let pendingMainWindowBounds = null
+let stageMediaPollTimer = null
+let stageMediaPollInProgress = false
+let approvedMedia = null
+let failedMediaSignature = null
+let nextMediaValidationId = 1
+let lastNonModalError = ''
+let quitConfirmationInProgress = false
+const pendingMediaValidations = new Map()
 
 function getProjectRoot() {
   return app.isPackaged ? path.join(process.resourcesPath, 'app') : path.join(__dirname, '..')
@@ -38,19 +58,11 @@ function readConfig() {
   }
 }
 
-function normalizeConfig(cfg) {
-  const windowBounds = normalizeStoredBounds(cfg?.window_bounds)
-  return {
-    whep_url: typeof cfg?.whep_url === 'string' ? cfg.whep_url : '',
-    last_updated: typeof cfg?.last_updated === 'string' ? cfg.last_updated : new Date().toISOString(),
-    ...(windowBounds ? { window_bounds: windowBounds } : {}),
-  }
-}
-
 function writeConfig(cfg) {
   const nextConfig = normalizeConfig({ ...readConfig(), ...cfg })
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true })
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(nextConfig, null, 2), 'utf8')
+  return nextConfig
 }
 
 function handlePythonOutput(data, log, prefix, markReady) {
@@ -194,6 +206,170 @@ function sendToSetupWindow(channel, payload) {
   setupWindow.webContents.send(channel, payload)
 }
 
+function getMediaSignature(stats) {
+  return `${stats.size}:${stats.mtimeMs}`
+}
+
+function getConfiguredMediaPath() {
+  return presentationController?.getSnapshot().stage_background.media_path || ''
+}
+
+function getApprovedMediaDescriptor() {
+  const mediaPath = getConfiguredMediaPath()
+  if (!approvedMedia || approvedMedia.path !== mediaPath) {
+    return { media_available: false, media_type: getStageMediaType(mediaPath), media_url: '' }
+  }
+  return {
+    media_available: true,
+    media_type: approvedMedia.type,
+    media_url: approvedMedia.url,
+  }
+}
+
+function buildPresentationSnapshot(snapshot = presentationController?.getSnapshot()) {
+  if (!snapshot) return null
+  return {
+    ...snapshot,
+    ...getApprovedMediaDescriptor(),
+  }
+}
+
+function publishPresentationState(snapshot) {
+  const payload = buildPresentationSnapshot(snapshot)
+  if (payload) sendToMainWindow('presentation-state-changed', payload)
+  updateStageMediaPolling()
+  return payload
+}
+
+function showNonModalError(message) {
+  if (!message || message === lastNonModalError) return
+  lastNonModalError = message
+  sendToMainWindow('non-modal-notification', { kind: 'error', message })
+}
+
+async function showOperationError(title, error) {
+  await dialog.showMessageBox(mainWindow || setupWindow, {
+    type: 'error',
+    title,
+    message: error?.message || String(error),
+    buttons: ['确定'],
+    defaultId: 0,
+    noLink: true,
+  })
+}
+
+function clearPendingMediaValidations(result = { ok: false, error: '媒体校验已取消' }) {
+  for (const pending of pendingMediaValidations.values()) {
+    clearTimeout(pending.timeout)
+    pending.resolve(result)
+  }
+  pendingMediaValidations.clear()
+}
+
+function requestMediaValidation(mediaPath, stats) {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) {
+    return Promise.resolve({ ok: false, error: '主展示窗口不可用' })
+  }
+  const mediaType = getStageMediaType(mediaPath)
+  if (!mediaType) {
+    return Promise.resolve({ ok: false, error: '不支持的舞台背景格式' })
+  }
+  const requestId = nextMediaValidationId++
+  const signature = getMediaSignature(stats)
+  const mediaUrl = `${pathToFileURL(mediaPath).href}?stage-media=${encodeURIComponent(signature)}`
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingMediaValidations.delete(requestId)
+      resolve({ ok: false, error: '媒体文件解码超时' })
+    }, STAGE_MEDIA_VALIDATION_TIMEOUT_MS)
+    pendingMediaValidations.set(requestId, { resolve, timeout })
+    sendToMainWindow('validate-stage-media', {
+      request_id: requestId,
+      media_type: mediaType,
+      media_url: mediaUrl,
+    })
+  })
+}
+
+async function validateAndApproveMedia(mediaPath, stats) {
+  const validation = await requestMediaValidation(mediaPath, stats)
+  if (!validation?.ok) return validation
+  const signature = getMediaSignature(stats)
+  approvedMedia = {
+    path: mediaPath,
+    signature,
+    type: getStageMediaType(mediaPath),
+    url: `${pathToFileURL(mediaPath).href}?stage-media=${encodeURIComponent(signature)}`,
+  }
+  failedMediaSignature = null
+  return { ok: true }
+}
+
+function isStageMediaRelevant() {
+  const snapshot = presentationController?.getSnapshot()
+  return Boolean(
+    snapshot &&
+    snapshot.effective_mode === PRESENTATION_MODES.FULLSCREEN_STAGE &&
+    snapshot.stage_background.kind === STAGE_BACKGROUND_KINDS.MEDIA &&
+    snapshot.stage_background.media_path &&
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    mainWindow.isVisible()
+  )
+}
+
+async function checkStageMedia() {
+  if (stageMediaPollInProgress || !isStageMediaRelevant()) return
+  stageMediaPollInProgress = true
+  try {
+    const mediaPath = getConfiguredMediaPath()
+    let stats
+    try {
+      stats = fs.statSync(mediaPath)
+      if (!stats.isFile()) throw new Error('not a file')
+    } catch {
+      if (approvedMedia) {
+        approvedMedia = null
+        failedMediaSignature = null
+        publishPresentationState()
+      }
+      return
+    }
+    const signature = getMediaSignature(stats)
+    if (approvedMedia?.path === mediaPath && approvedMedia.signature === signature) return
+    if (failedMediaSignature === signature) return
+    const previousApprovedMedia = approvedMedia
+    const validation = await validateAndApproveMedia(mediaPath, stats)
+    if (validation.ok) {
+      publishPresentationState()
+    } else {
+      approvedMedia = previousApprovedMedia?.path === mediaPath ? previousApprovedMedia : null
+      failedMediaSignature = signature
+      publishPresentationState()
+    }
+  } finally {
+    stageMediaPollInProgress = false
+  }
+}
+
+function stopStageMediaPolling() {
+  if (stageMediaPollTimer) {
+    clearInterval(stageMediaPollTimer)
+    stageMediaPollTimer = null
+  }
+}
+
+function updateStageMediaPolling() {
+  if (!isStageMediaRelevant()) {
+    stopStageMediaPolling()
+    return
+  }
+  if (!stageMediaPollTimer) {
+    stageMediaPollTimer = setInterval(checkStageMedia, STAGE_MEDIA_POLL_INTERVAL_MS)
+  }
+  setTimeout(checkStageMedia, 0)
+}
+
 function updateMainWindowSaveStatus(status) {
   mainWindowSaveStatus = status
   sendToMainWindow('main-window-save-status', status)
@@ -202,15 +378,20 @@ function updateMainWindowSaveStatus(status) {
 function persistMainWindowBounds(bounds) {
   try {
     writeConfig({ window_bounds: bounds })
+    pendingMainWindowBounds = null
+    presentationController?.updateDesktopBounds(bounds)
+    lastNonModalError = ''
     const status = { state: 'saved' }
     updateMainWindowSaveStatus(status)
     return status
   } catch (error) {
+    pendingMainWindowBounds = { ...bounds }
     const status = {
       state: 'error',
       message: error?.message || 'Unable to write the window configuration.',
     }
     updateMainWindowSaveStatus(status)
+    showNonModalError(`窗口位置和尺寸保存失败：${status.message}`)
     return status
   }
 }
@@ -231,10 +412,17 @@ function correctMainWindowBounds(bounds, fallbackWorkArea) {
 }
 
 function flushMainWindowBoundsSave() {
-  if (!mainWindowBoundsSaveTimer || !mainWindow || mainWindow.isDestroyed()) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
     clearMainWindowBoundsSaveTimer()
     return null
   }
+
+  const snapshot = presentationController?.getSnapshot()
+  if (snapshot?.effective_mode === PRESENTATION_MODES.FULLSCREEN_STAGE) {
+    clearMainWindowBoundsSaveTimer()
+    return null
+  }
+  if (!mainWindowBoundsSaveTimer && !pendingMainWindowBounds) return null
 
   clearMainWindowBoundsSaveTimer()
   const currentBounds = mainWindow.getBounds()
@@ -251,8 +439,12 @@ function queueMainWindowBoundsSave() {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
+  if (presentationController?.getSnapshot().effective_mode === PRESENTATION_MODES.FULLSCREEN_STAGE) {
+    return
+  }
 
   const bounds = mainWindow.getBounds()
+  pendingMainWindowBounds = { ...bounds }
   sendToMainWindow('main-window-bounds-changed', bounds)
   updateMainWindowSaveStatus({ state: 'saving' })
   clearMainWindowBoundsSaveTimer()
@@ -270,6 +462,13 @@ function assertMainWindowSender(event) {
 }
 
 function applyMainWindowBounds(bounds) {
+  if (presentationController?.getSnapshot().effective_mode === PRESENTATION_MODES.FULLSCREEN_STAGE) {
+    return {
+      ok: false,
+      fieldErrors: {},
+      message: '全屏舞台中不能修改桌面宠物窗口。',
+    }
+  }
   const fieldErrors = validateBounds(bounds)
   if (Object.keys(fieldErrors).length > 0) {
     return {
@@ -340,6 +539,238 @@ function getInitialMainWindowBounds() {
   return { bounds: correctedBounds, corrected: true }
 }
 
+async function runDiscretePresentationAction(title, action) {
+  try {
+    await action()
+    return true
+  } catch (error) {
+    await showOperationError(title, error)
+    return false
+  }
+}
+
+async function setPresentationMode(mode) {
+  if (presentationController?.getSnapshot().editing_person) return false
+  flushMainWindowBoundsSave()
+  return runDiscretePresentationAction('切换呈现模式失败', async () => {
+    const snapshot = await presentationController.setMode(mode)
+    publishPresentationState(snapshot)
+  })
+}
+
+async function setStageBackgroundKind(kind) {
+  if (kind === STAGE_BACKGROUND_KINDS.MEDIA) {
+    const mediaPath = getConfiguredMediaPath()
+    let stats
+    try {
+      stats = fs.statSync(mediaPath)
+      if (!stats.isFile()) throw new Error('已选媒体文件不可用')
+    } catch (error) {
+      await showOperationError('设置舞台背景失败', error)
+      return false
+    }
+    const signature = getMediaSignature(stats)
+    if (approvedMedia?.path !== mediaPath || approvedMedia.signature !== signature) {
+      const validation = await validateAndApproveMedia(mediaPath, stats)
+      if (!validation.ok) {
+        await showOperationError('设置舞台背景失败', new Error(validation.error || '媒体文件无法解码'))
+        return false
+      }
+    }
+  }
+  return runDiscretePresentationAction('设置舞台背景失败', async () => {
+    const snapshot = presentationController.setBackgroundKind(kind)
+    publishPresentationState(snapshot)
+  })
+}
+
+async function chooseStageBackgroundMedia() {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择舞台背景媒体',
+    properties: ['openFile'],
+    filters: [
+      { name: '舞台背景', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'mp4'] },
+      { name: '所有文件', extensions: ['*'] },
+    ],
+  })
+  if (result.canceled || result.filePaths.length === 0) return false
+  const mediaPath = result.filePaths[0]
+  const mediaType = getStageMediaType(mediaPath)
+  if (!mediaType) {
+    await showOperationError('舞台背景不可用', new Error('仅支持 PNG、JPG/JPEG、WebP、BMP、GIF 和 MP4。'))
+    return false
+  }
+  let stats
+  try {
+    stats = fs.statSync(mediaPath)
+    if (!stats.isFile()) throw new Error('所选路径不是文件')
+  } catch (error) {
+    await showOperationError('舞台背景不可用', error)
+    return false
+  }
+  const previousApprovedMedia = approvedMedia
+  const validation = await validateAndApproveMedia(mediaPath, stats)
+  if (!validation.ok) {
+    approvedMedia = previousApprovedMedia
+    await showOperationError('舞台背景不可用', new Error(validation.error || '媒体文件无法解码'))
+    return false
+  }
+  const saved = await runDiscretePresentationAction('保存舞台背景失败', async () => {
+    const snapshot = presentationController.selectMediaPath(mediaPath)
+    publishPresentationState(snapshot)
+  })
+  if (!saved) approvedMedia = previousApprovedMedia
+  return saved
+}
+
+async function clearStageBackgroundMedia() {
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: '清除舞台背景媒体',
+    message: '确认切换为透明背景并删除已保存的媒体路径吗？',
+    buttons: ['取消', '清除'],
+    cancelId: 0,
+    defaultId: 0,
+    noLink: true,
+  })
+  if (result.response !== 1) return false
+  return runDiscretePresentationAction('清除舞台背景失败', async () => {
+    const snapshot = presentationController.clearMediaPath()
+    approvedMedia = null
+    failedMediaSignature = null
+    publishPresentationState(snapshot)
+  })
+}
+
+async function resetStagePersonLayout() {
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: '恢复默认人物布局',
+    message: '确认恢复全屏舞台的默认人物大小和位置吗？',
+    buttons: ['取消', '恢复默认'],
+    cancelId: 0,
+    defaultId: 0,
+    noLink: true,
+  })
+  if (result.response !== 1) return false
+  return runDiscretePresentationAction('恢复人物布局失败', async () => {
+    const snapshot = presentationController.resetPersonLayout()
+    publishPresentationState(snapshot)
+  })
+}
+
+function beginStagePersonEditing() {
+  if (!presentationController || presentationController.getSnapshot().editing_person) return false
+  flushMainWindowBoundsSave()
+  try {
+    publishPresentationState(presentationController.beginPersonEditing())
+    return true
+  } catch (error) {
+    showOperationError('打开人物布局编辑失败', error)
+    return false
+  }
+}
+
+function isConfiguredMediaAvailable() {
+  const mediaPath = getConfiguredMediaPath()
+  if (!mediaPath) return false
+  try {
+    return fs.statSync(mediaPath).isFile()
+  } catch {
+    return false
+  }
+}
+
+function buildMainWindowContextMenu() {
+  const snapshot = presentationController.getSnapshot()
+  const mediaPath = snapshot.stage_background.media_path
+  const mediaName = mediaPath ? path.basename(mediaPath) : '未选择'
+  const mediaAvailable = isConfiguredMediaAvailable()
+  return Menu.buildFromTemplate([
+    {
+      label: '桌面宠物模式',
+      type: 'radio',
+      checked: snapshot.presentation_mode === PRESENTATION_MODES.DESKTOP_PET,
+      click: () => setPresentationMode(PRESENTATION_MODES.DESKTOP_PET),
+    },
+    {
+      label: '全屏舞台模式',
+      type: 'radio',
+      checked: snapshot.presentation_mode === PRESENTATION_MODES.FULLSCREEN_STAGE,
+      click: () => setPresentationMode(PRESENTATION_MODES.FULLSCREEN_STAGE),
+    },
+    { type: 'separator' },
+    {
+      label: '舞台背景',
+      submenu: [
+        {
+          label: '透明背景',
+          type: 'radio',
+          checked: snapshot.stage_background.kind === STAGE_BACKGROUND_KINDS.TRANSPARENT,
+          click: () => setStageBackgroundKind(STAGE_BACKGROUND_KINDS.TRANSPARENT),
+        },
+        {
+          label: `使用已选媒体：${mediaName}${mediaPath && !mediaAvailable ? '（不可用）' : ''}`,
+          type: 'radio',
+          checked: snapshot.stage_background.kind === STAGE_BACKGROUND_KINDS.MEDIA,
+          enabled: Boolean(mediaPath && mediaAvailable),
+          click: () => setStageBackgroundKind(STAGE_BACKGROUND_KINDS.MEDIA),
+        },
+        { type: 'separator' },
+        { label: '选择本地媒体…', click: chooseStageBackgroundMedia },
+        { label: '清除已选媒体…', enabled: Boolean(mediaPath), click: clearStageBackgroundMedia },
+      ],
+    },
+    { label: '编辑人物大小和位置…', click: beginStagePersonEditing },
+    { label: '恢复默认人物布局…', click: resetStagePersonLayout },
+    { type: 'separator' },
+    { label: '重新检测连接', click: restartAutomaticAccess },
+    { type: 'separator' },
+    { label: '退出应用…', click: requestApplicationQuit },
+  ])
+}
+
+async function requestApplicationQuit() {
+  if (isQuitting || quitConfirmationInProgress) return
+  quitConfirmationInProgress = true
+  try {
+    const confirmation = await dialog.showMessageBox(mainWindow || setupWindow, {
+      type: 'question',
+      title: '退出应用',
+      message: '确认退出 Open-LLM-VTuber 吗？',
+      buttons: ['取消', '退出'],
+      cancelId: 0,
+      defaultId: 0,
+      noLink: true,
+    })
+    if (confirmation.response !== 1) return
+
+    let saveStatus = flushMainWindowBoundsSave()
+    if (!saveStatus && pendingMainWindowBounds) {
+      saveStatus = persistMainWindowBounds(pendingMainWindowBounds)
+    }
+    while (saveStatus?.state === 'error') {
+      const decision = await dialog.showMessageBox(mainWindow || setupWindow, {
+        type: 'error',
+        title: '最终保存失败',
+        message: saveStatus.message || '窗口位置和尺寸无法保存。',
+        buttons: ['重试', '仍然退出'],
+        cancelId: 0,
+        defaultId: 0,
+        noLink: true,
+      })
+      if (decision.response === 1) break
+      saveStatus = pendingMainWindowBounds
+        ? persistMainWindowBounds(pendingMainWindowBounds)
+        : null
+    }
+    isQuitting = true
+    app.quit()
+  } finally {
+    quitConfirmationInProgress = false
+  }
+}
+
 function createMainWindow({ show = true } = {}) {
   if (mainWindow) {
     if (show) {
@@ -371,27 +802,38 @@ function createMainWindow({ show = true } = {}) {
       backgroundThrottling: false,
     },
   })
+  mainWindow.setAlwaysOnTop(true, 'screen-saver')
+  if (initialWindowBounds.corrected) {
+    writeConfig({ window_bounds: initialWindowBounds.bounds })
+  }
+  presentationController = createPresentationController({
+    readConfig,
+    writeConfig,
+    window: mainWindow,
+    getDisplayMatching: (bounds) => screen.getDisplayMatching(bounds),
+    getPrimaryDisplay: () => screen.getPrimaryDisplay(),
+    getAllDisplays: () => screen.getAllDisplays(),
+  })
+  presentationController.applySavedMode()
   mainWindow.webContents.on('context-menu', () => {
-    const menu = Menu.buildFromTemplate([
-      {
-        label: '重新检测连接',
-        click: restartAutomaticAccess,
-      },
-    ])
-    menu.popup({ window: mainWindow })
+    if (presentationController.getSnapshot().editing_person) return
+    buildMainWindowContextMenu().popup({ window: mainWindow })
   })
   mainWindow.on('move', queueMainWindowBoundsSave)
   mainWindow.on('resize', queueMainWindowBoundsSave)
   mainWindow.on('close', (event) => {
-    flushMainWindowBoundsSave()
     quitFromWindowClose(event)
   })
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'main.html'))
-  if (initialWindowBounds.corrected) {
-    persistMainWindowBounds(initialWindowBounds.bounds)
-  }
+  mainWindow.webContents.on('did-finish-load', () => {
+    publishPresentationState(presentationController.applySavedMode())
+  })
   mainWindow.on('closed', () => {
     clearMainWindowBoundsSaveTimer()
+    stopStageMediaPolling()
+    clearPendingMediaValidations()
+    presentationController?.dispose()
+    presentationController = null
     mainWindow = null
   })
 }
@@ -431,11 +873,14 @@ function quitFromWindowClose(event) {
     return
   }
   event.preventDefault()
-  app.quit()
+  requestApplicationQuit()
 }
 
 function showMainWindow() {
   createMainWindow({ show: true })
+  if (presentationController) {
+    publishPresentationState(presentationController.applySavedMode())
+  }
   if (setupWindow && !setupWindow.isDestroyed()) {
     setupWindow.hide()
   }
@@ -444,6 +889,17 @@ function showMainWindow() {
 function showAutoConnectWindow() {
   createSetupWindow()
   if (mainWindow && !mainWindow.isDestroyed()) {
+    if (presentationController?.getSnapshot().editing_person) {
+      presentationController.cancelPersonEditing()
+    }
+    const suspendedSnapshot = {
+      ...presentationController?.getSnapshot(),
+      effective_mode: PRESENTATION_MODES.DESKTOP_PET,
+      previewing_stage: false,
+      editing_person: false,
+    }
+    sendToMainWindow('presentation-state-changed', buildPresentationSnapshot(suspendedSnapshot))
+    stopStageMediaPolling()
     mainWindow.hide()
   }
 }
@@ -455,7 +911,11 @@ function restartAutomaticAccess() {
 
 app.whenReady().then(() => {
   ipcMain.handle('get-config', () => normalizeConfig(readConfig()))
-  ipcMain.handle('save-config', (_, cfg) => { writeConfig(cfg); return true })
+  ipcMain.handle('save-config', (_, cfg) => {
+    writeConfig(cfg)
+    presentationController?.reloadConfig()
+    return true
+  })
   ipcMain.handle('get-ws-url', () => `ws://localhost:${SERVER_PORT}/client-ws`)
   ipcMain.handle('get-main-window-state', (event) => {
     assertMainWindowSender(event)
@@ -471,6 +931,63 @@ app.whenReady().then(() => {
   ipcMain.handle('reset-main-window-bounds', (event) => {
     assertMainWindowSender(event)
     return resetMainWindowBounds()
+  })
+  ipcMain.handle('get-presentation-state', (event) => {
+    assertMainWindowSender(event)
+    return buildPresentationSnapshot()
+  })
+  ipcMain.handle('set-presentation-mode', (event, mode) => {
+    assertMainWindowSender(event)
+    return setPresentationMode(mode)
+  })
+  ipcMain.handle('set-stage-background-kind', (event, kind) => {
+    assertMainWindowSender(event)
+    return setStageBackgroundKind(kind)
+  })
+  ipcMain.handle('begin-stage-person-editing', (event) => {
+    assertMainWindowSender(event)
+    return beginStagePersonEditing()
+  })
+  ipcMain.handle('save-stage-person-layout', async (event, layout) => {
+    assertMainWindowSender(event)
+    try {
+      publishPresentationState(presentationController.savePersonLayout(layout))
+      return true
+    } catch (error) {
+      publishPresentationState(presentationController.cancelPersonEditing())
+      await showOperationError('保存人物布局失败', error)
+      return false
+    }
+  })
+  ipcMain.handle('cancel-stage-person-editing', (event) => {
+    assertMainWindowSender(event)
+    publishPresentationState(presentationController.cancelPersonEditing())
+    return true
+  })
+  ipcMain.handle('request-application-quit', (event) => {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender)
+    if (senderWindow !== mainWindow && senderWindow !== setupWindow) {
+      throw new Error('Unknown quit request source.')
+    }
+    requestApplicationQuit()
+    return true
+  })
+  ipcMain.on('stage-media-validation-result', (event, result) => {
+    assertMainWindowSender(event)
+    const pending = pendingMediaValidations.get(result?.request_id)
+    if (!pending) return
+    clearTimeout(pending.timeout)
+    pendingMediaValidations.delete(result.request_id)
+    pending.resolve(result?.ok
+      ? { ok: true }
+      : { ok: false, error: result?.error || '媒体文件无法解码' })
+  })
+  ipcMain.on('stage-media-render-failure', (event, payload) => {
+    assertMainWindowSender(event)
+    if (payload?.media_url !== approvedMedia?.url) return
+    failedMediaSignature = approvedMedia.signature
+    approvedMedia = null
+    publishPresentationState()
   })
   ipcMain.handle('show-main-window', (event) => {
     assertMainWindowSender(event)
@@ -491,18 +1008,62 @@ app.whenReady().then(() => {
   createSetupWindow()
   createMainWindow({ show: false })
 
-  Promise.resolve()
-    .then(spawnPython)
-    .then(() => console.log('Python server ready.'))
-    .catch((e) => {
-    console.error('Python server failed to start:', e.message)
-    // Continue anyway - user may have server running separately
-    })
+  screen.on('display-removed', (_event, display) => {
+    const config = normalizeConfig(readConfig())
+    if (config.window_bounds && !hasMinimumVisibleArea(
+      config.window_bounds,
+      getDisplayWorkAreas(),
+      MIN_VISIBLE_SIZE
+    )) {
+      const corrected = constrainBoundsToWorkArea(
+        config.window_bounds,
+        screen.getPrimaryDisplay().workArea,
+        MIN_VISIBLE_SIZE
+      )
+      try {
+        writeConfig({ window_bounds: corrected })
+        presentationController?.reloadConfig()
+        if (presentationController?.getSnapshot().effective_mode === PRESENTATION_MODES.DESKTOP_PET) {
+          mainWindow.setBounds(corrected)
+          presentationController.updateDesktopBounds(corrected)
+          sendToMainWindow('main-window-bounds-changed', corrected)
+        }
+      } catch (error) {
+        pendingMainWindowBounds = corrected
+        showNonModalError(`窗口位置和尺寸保存失败：${error?.message || error}`)
+      }
+    }
+    if (presentationController?.handleDisplayRemoved(display.id)) {
+      publishPresentationState()
+    }
+  })
+  screen.on('display-metrics-changed', (_event, display) => {
+    if (presentationController?.refreshStageDisplay(display.id)) {
+      publishPresentationState()
+    }
+  })
+
+  if (process.env.ELECTRON_SKIP_BACKEND_STARTUP_FOR_TESTS !== '1') {
+    Promise.resolve()
+      .then(spawnPython)
+      .then(() => console.log('Python server ready.'))
+      .catch((error) => {
+        console.error('Python server failed to start:', error.message)
+        // Continue anyway - user may have server running separately
+      })
+  }
 })
 
-app.on('before-quit', () => {
-  isQuitting = true
+app.on('before-quit', (event) => {
+  if (!isQuitting) {
+    event.preventDefault()
+    requestApplicationQuit()
+    return
+  }
   flushMainWindowBoundsSave()
+  stopStageMediaPolling()
+  clearPendingMediaValidations()
+  presentationController?.dispose()
   stopPythonProcess()
 })
 

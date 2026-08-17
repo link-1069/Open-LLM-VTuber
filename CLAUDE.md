@@ -135,3 +135,17 @@ Messages are JSON. The client sends types like `text-input`, `mic-audio-end`, `i
 - `deep_merge(dict1, dict2)` in `service_context.py` merges character overrides; dict2 values win.
 - `chat_history_manager.py` sanitizes path components to prevent directory traversal — always use its public API.
 - `MessageHandler` (`message_handler.py`) provides a request/response correlation mechanism over WebSocket via `wait_for_response` / `handle_message`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked in the upstream GitHub repository. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Engineering skills use the default five-role triage vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain documentation uses a single-context layout. See `docs/agents/domain.md`.

@@ -14,6 +14,19 @@
       -webkit-app-region: drag;
     }
 
+    body[data-presentation-mode="fullscreen_stage"] {
+      -webkit-app-region: no-drag;
+    }
+
+    #stage-background {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      overflow: hidden;
+      pointer-events: none;
+      -webkit-app-region: no-drag;
+    }
+
     .stream-layer,
     .stream-stage {
       position: absolute;
@@ -21,25 +34,12 @@
       width: 100%; height: 100%;
     }
 
-    .stream-layer[hidden] { display: none; }
-
-    #subtitle {
-      position: absolute;
-      bottom: 24px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.55);
-      color: #fff;
-      padding: 6px 16px;
-      border-radius: 20px;
-      font-size: 14px;
-      max-width: 80%;
-      text-align: center;
+    .stream-layer {
+      z-index: 1;
       pointer-events: none;
-      -webkit-app-region: no-drag;
-      display: none;
-      white-space: pre-wrap;
     }
+
+    .stream-layer[hidden] { display: none; }
 
     .stream-video {
       /* Hidden source for Three.js VideoTexture; keep stream audio silent. */
@@ -187,9 +187,78 @@
 
     #window-save-status[data-state="saved"] { color: #9be7b1; }
     #window-save-status[data-state="error"] { color: #ff9c9c; }
+
+    body[data-presentation-mode="fullscreen_stage"] #window-controls-hotspot,
+    body[data-presentation-mode="fullscreen_stage"] #window-controls-panel {
+      display: none;
+    }
+
+    #stage-person-editor {
+      position: absolute;
+      inset: 0;
+      z-index: 10010;
+      pointer-events: none;
+      -webkit-app-region: no-drag;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+
+    #stage-person-editor[hidden] { display: none; }
+
+    #stage-person-frame {
+      position: absolute;
+      border: 2px solid #69b7ff;
+      background: rgba(64, 153, 255, 0.08);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 18px rgba(69, 158, 255, 0.55);
+      cursor: move;
+      pointer-events: auto;
+      touch-action: none;
+    }
+
+    #stage-person-actions {
+      position: absolute;
+      left: 50%;
+      bottom: 28px;
+      display: flex;
+      gap: 12px;
+      transform: translateX(-50%);
+      pointer-events: auto;
+    }
+
+    #stage-person-actions button {
+      min-width: 96px;
+      padding: 10px 22px;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      border-radius: 9px;
+      background: rgba(20, 25, 34, 0.92);
+      color: #fff;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    #stage-person-save { background: rgba(31, 112, 205, 0.95) !important; }
+
+    #non-modal-notification {
+      position: absolute;
+      left: 50%;
+      top: 24px;
+      z-index: 10020;
+      max-width: min(720px, calc(100vw - 48px));
+      padding: 10px 16px;
+      transform: translateX(-50%);
+      border-radius: 9px;
+      background: rgba(120, 22, 22, 0.92);
+      color: #fff;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      pointer-events: none;
+      -webkit-app-region: no-drag;
+    }
+
+    #non-modal-notification[hidden] { display: none; }
   </style>
 </head>
 <body>
+  <div id="stage-background" aria-hidden="true"></div>
   <div id="stream-layer-0" class="stream-layer" hidden>
     <div id="stage-0" class="stream-stage"></div>
     <video id="video-0" class="stream-video" autoplay playsinline muted></video>
@@ -198,7 +267,14 @@
     <div id="stage-1" class="stream-stage"></div>
     <video id="video-1" class="stream-video" autoplay playsinline muted></video>
   </div>
-  <div id="subtitle"></div>
+  <section id="stage-person-editor" hidden>
+    <div id="stage-person-frame" aria-label="人物画面编辑框"></div>
+    <div id="stage-person-actions">
+      <button id="stage-person-save" type="button">保存</button>
+      <button id="stage-person-cancel" type="button">取消</button>
+    </div>
+  </section>
+  <div id="non-modal-notification" role="status" aria-live="polite" hidden></div>
   <button
     id="window-controls-hotspot"
     type="button"
@@ -256,7 +332,9 @@
   <script src="digital_human_stream_manager.js"></script>
   <script src="auto_connect.js"></script>
   <script src="../window_bounds.js"></script>
+  <script src="../presentation_layout.js"></script>
   <script src="window_controls.js"></script>
+  <script src="stage_view.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

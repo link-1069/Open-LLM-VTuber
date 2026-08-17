@@ -30,7 +30,9 @@ test('loads Three.js and renderer modules before the main renderer', () => {
     'digital_human_stream_manager.js',
     'auto_connect.js',
     '../window_bounds.js',
+    '../presentation_layout.js',
     'window_controls.js',
+    'stage_view.js',
     'renderer.js',
   ])
 })
@@ -70,11 +72,31 @@ test('main window context menu can restart automatic connection detection', () =
   const menuItemIndex = script.indexOf("label: '重新检测连接'")
   const restartIndex = script.indexOf('click: restartAutomaticAccess', menuItemIndex)
 
-  assert.match(script, /const \{ app, BrowserWindow, ipcMain, Menu, screen \} = require\('electron'\)/)
+  assert.match(script, /const \{ app, BrowserWindow, dialog, ipcMain, Menu, screen \} = require\('electron'\)/)
   assert.match(script, /mainWindow\.webContents\.on\('context-menu'/)
   assert.notEqual(menuItemIndex, -1)
   assert.notEqual(restartIndex, -1)
   assert.match(script, /function restartAutomaticAccess\(\) \{[\s\S]*showAutoConnectWindow\(\)[\s\S]*sendToMainWindow\('restart-auto-connect'\)/)
+})
+
+test('main window exposes both presentation modes, stage controls, and a unified exit action', () => {
+  const html = fs.readFileSync(htmlPath, 'utf8')
+  const mainScript = fs.readFileSync(mainProcessPath, 'utf8')
+  const preloadScript = fs.readFileSync(preloadPath, 'utf8')
+  const rendererScript = fs.readFileSync(rendererScriptPath, 'utf8')
+
+  assert.match(mainScript, /label: '桌面宠物模式'/)
+  assert.match(mainScript, /label: '全屏舞台模式'/)
+  assert.match(mainScript, /label: '舞台背景'/)
+  assert.match(mainScript, /label: '编辑人物大小和位置…'/)
+  assert.match(mainScript, /label: '退出应用…'/)
+  assert.match(mainScript, /setAlwaysOnTop\(true, 'screen-saver'\)/)
+  assert.match(preloadScript, /getPresentationState:/)
+  assert.match(preloadScript, /saveStagePersonLayout:/)
+  assert.match(html, /id="stage-background"/)
+  assert.match(html, /id="stage-person-editor"[^>]*hidden/)
+  assert.doesNotMatch(html, /id="subtitle"/)
+  assert.doesNotMatch(rendererScript, /showSubtitle/)
 })
 
 test('setup window creation reuses an existing setup window', () => {
@@ -86,8 +108,8 @@ test('setup window creation reuses an existing setup window', () => {
 test('setup page renders automatic connection progress', () => {
   const script = fs.readFileSync(setupScriptPath, 'utf8')
   assert.match(script, /window\.electronAPI\.onAutoConnectProgress\(renderProgress\)/)
-  assert.match(script, /case 'connecting'/)
-  assert.match(script, /case 'waiting-frame'/)
+  assert.match(script, /case AUTO_CONNECT_PHASES\.CONNECTING/)
+  assert.match(script, /case AUTO_CONNECT_PHASES\.WAITING_FRAME/)
 })
 
 test('main renderer delegates stream failure recovery to automatic access', () => {
