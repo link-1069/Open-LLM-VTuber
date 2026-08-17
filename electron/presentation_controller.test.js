@@ -154,6 +154,38 @@ test('fullscreen stage moves to the primary display when its target is removed',
   assert.deepEqual(harness.windowAdapter.bounds, displays[0].bounds)
 })
 
+test('a disconnected stage display can correct the saved desktop bounds before returning', async () => {
+  const displays = [
+    {
+      id: 1,
+      bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      workArea: { x: 0, y: 0, width: 1920, height: 1040 },
+    },
+    {
+      id: 2,
+      bounds: { x: 1920, y: 0, width: 2560, height: 1440 },
+      workArea: { x: 1920, y: 0, width: 2560, height: 1400 },
+    },
+  ]
+  const harness = createHarness({
+    presentation_mode: 'fullscreen_stage',
+    window_bounds: { x: 2100, y: 50, width: 480, height: 800 },
+  }, { displays, matchingDisplayIndex: 1 })
+  harness.controller.applySavedMode()
+
+  harness.controller.correctDesktopBounds({ x: 100, y: 50, width: 480, height: 800 })
+  harness.controller.handleDisplayRemoved(2)
+  await harness.controller.setMode('desktop_pet')
+
+  assert.deepEqual(harness.windowAdapter.bounds, { x: 100, y: 50, width: 480, height: 800 })
+  assert.deepEqual(harness.getStoredConfig().window_bounds, {
+    x: 100,
+    y: 50,
+    width: 480,
+    height: 800,
+  })
+})
+
 test('a failed mode save restores the prior desktop window and durable state', async () => {
   const harness = createHarness(
     {

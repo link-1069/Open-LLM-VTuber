@@ -236,13 +236,17 @@ function createPresentationController(options) {
     })
   }
 
+  function correctDesktopBounds(bounds) {
+    desktopBounds = { ...bounds }
+    config = normalizeConfig({ ...config, window_bounds: desktopBounds })
+    return true
+  }
+
   function updateDesktopBounds(bounds) {
     if (effectiveMode !== PRESENTATION_MODES.DESKTOP_PET || previewingStage) {
       return false
     }
-    desktopBounds = { ...bounds }
-    config = normalizeConfig({ ...config, window_bounds: desktopBounds })
-    return true
+    return correctDesktopBounds(bounds)
   }
 
   function handleDisplayRemoved(displayId) {
@@ -273,6 +277,7 @@ function createPresentationController(options) {
     beginPersonEditing,
     cancelPersonEditing,
     clearMediaPath,
+    correctDesktopBounds,
     dispose,
     getSnapshot,
     handleDisplayRemoved,

@@ -50,9 +50,17 @@ function normalizeConfig(config) {
   const background = value.stage_background && typeof value.stage_background === 'object'
     ? value.stage_background
     : {}
-  const backgroundKind = Object.values(STAGE_BACKGROUND_KINDS).includes(background.kind)
+  const requestedBackgroundKind = Object.values(STAGE_BACKGROUND_KINDS).includes(background.kind)
     ? background.kind
     : DEFAULT_PRESENTATION_CONFIG.stage_background.kind
+  const mediaPath = typeof background.media_path === 'string' &&
+    path.isAbsolute(background.media_path) &&
+    getStageMediaType(background.media_path)
+    ? background.media_path
+    : ''
+  const backgroundKind = requestedBackgroundKind === STAGE_BACKGROUND_KINDS.MEDIA && !mediaPath
+    ? STAGE_BACKGROUND_KINDS.TRANSPARENT
+    : requestedBackgroundKind
   const personLayout = normalizeStagePersonLayout(value.stage_person_layout)
   return {
     whep_url: typeof value.whep_url === 'string' ? value.whep_url : '',
@@ -63,9 +71,7 @@ function normalizeConfig(config) {
     presentation_mode: presentationMode,
     stage_background: {
       kind: backgroundKind,
-      media_path: typeof background.media_path === 'string' && path.isAbsolute(background.media_path)
-        ? background.media_path
-        : '',
+      media_path: mediaPath,
     },
     stage_person_layout: {
       ...personLayout,

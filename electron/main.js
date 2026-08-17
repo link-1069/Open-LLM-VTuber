@@ -1,9 +1,14 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, screen } = require('electron')
 const path = require('path')
 const fs = require('fs')
-const { pathToFileURL } = require('url')
 const { spawn, spawnSync } = require('child_process')
 const { createPresentationController } = require('./presentation_controller')
+const { runPresentationExit } = require('./presentation_exit')
+const {
+  buildStageMediaUrl,
+  getMediaSignature,
+  inspectStageMedia,
+} = require('./presentation_media')
 const {
   PRESENTATION_MODES,
   STAGE_BACKGROUND_KINDS,
@@ -40,7 +45,7 @@ let pendingMainWindowBounds = null
 let stageMediaPollTimer = null
 let stageMediaPollInProgress = false
 let approvedMedia = null
-let failedMediaSignature = null
+let failedMedia = null
 let nextMediaValidationId = 1
 let lastNonModalError = ''
 let quitConfirmationInProgress = false
@@ -60,8 +65,17 @@ function readConfig() {
 
 function writeConfig(cfg) {
   const nextConfig = normalizeConfig({ ...readConfig(), ...cfg })
+  const temporaryPath = `${CONFIG_PATH}.${process.pid}.tmp`
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true })
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(nextConfig, null, 2), 'utf8')
+  try {
+    fs.writeFileSync(temporaryPath, JSON.stringify(nextConfig, null, 2), 'utf8')
+    fs.renameSync(temporaryPath, CONFIG_PATH)
+  } catch (error) {
+    try {
+      fs.unlinkSync(temporaryPath)
+    } catch {}
+    throw error
+  }
   return nextConfig
 }
 
@@ -206,10 +220,6 @@ function sendToSetupWindow(channel, payload) {
   setupWindow.webContents.send(channel, payload)
 }
 
-function getMediaSignature(stats) {
-  return `${stats.size}:${stats.mtimeMs}`
-}
-
 function getConfiguredMediaPath() {
   return presentationController?.getSnapshot().stage_background.media_path || ''
 }
@@ -276,7 +286,7 @@ function requestMediaValidation(mediaPath, stats) {
   }
   const requestId = nextMediaValidationId++
   const signature = getMediaSignature(stats)
-  const mediaUrl = `${pathToFileURL(mediaPath).href}?stage-media=${encodeURIComponent(signature)}`
+  const mediaUrl = buildStageMediaUrl(mediaPath, signature)
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
       pendingMediaValidations.delete(requestId)
@@ -299,9 +309,9 @@ async function validateAndApproveMedia(mediaPath, stats) {
     path: mediaPath,
     signature,
     type: getStageMediaType(mediaPath),
-    url: `${pathToFileURL(mediaPath).href}?stage-media=${encodeURIComponent(signature)}`,
+    url: buildStageMediaUrl(mediaPath, signature),
   }
-  failedMediaSignature = null
+  failedMedia = null
   return { ok: true }
 }
 
@@ -323,28 +333,25 @@ async function checkStageMedia() {
   stageMediaPollInProgress = true
   try {
     const mediaPath = getConfiguredMediaPath()
-    let stats
-    try {
-      stats = fs.statSync(mediaPath)
-      if (!stats.isFile()) throw new Error('not a file')
-    } catch {
+    const inspection = inspectStageMedia(mediaPath, { failedMedia })
+    if (!inspection.available) {
+      if (inspection.reason === 'decode_failed') return
       if (approvedMedia) {
         approvedMedia = null
-        failedMediaSignature = null
+        failedMedia = null
         publishPresentationState()
       }
       return
     }
-    const signature = getMediaSignature(stats)
+    const { signature, stats } = inspection
     if (approvedMedia?.path === mediaPath && approvedMedia.signature === signature) return
-    if (failedMediaSignature === signature) return
     const previousApprovedMedia = approvedMedia
     const validation = await validateAndApproveMedia(mediaPath, stats)
     if (validation.ok) {
       publishPresentationState()
     } else {
       approvedMedia = previousApprovedMedia?.path === mediaPath ? previousApprovedMedia : null
-      failedMediaSignature = signature
+      failedMedia = { path: mediaPath, signature }
       publishPresentationState()
     }
   } finally {
@@ -561,18 +568,16 @@ async function setPresentationMode(mode) {
 async function setStageBackgroundKind(kind) {
   if (kind === STAGE_BACKGROUND_KINDS.MEDIA) {
     const mediaPath = getConfiguredMediaPath()
-    let stats
-    try {
-      stats = fs.statSync(mediaPath)
-      if (!stats.isFile()) throw new Error('已选媒体文件不可用')
-    } catch (error) {
-      await showOperationError('设置舞台背景失败', error)
+    const inspection = inspectStageMedia(mediaPath, { failedMedia })
+    if (!inspection.available) {
+      await showOperationError('设置舞台背景失败', new Error('已选媒体文件不可用'))
       return false
     }
-    const signature = getMediaSignature(stats)
+    const { signature, stats } = inspection
     if (approvedMedia?.path !== mediaPath || approvedMedia.signature !== signature) {
       const validation = await validateAndApproveMedia(mediaPath, stats)
       if (!validation.ok) {
+        failedMedia = { path: mediaPath, signature }
         await showOperationError('设置舞台背景失败', new Error(validation.error || '媒体文件无法解码'))
         return false
       }
@@ -600,14 +605,12 @@ async function chooseStageBackgroundMedia() {
     await showOperationError('舞台背景不可用', new Error('仅支持 PNG、JPG/JPEG、WebP、BMP、GIF 和 MP4。'))
     return false
   }
-  let stats
-  try {
-    stats = fs.statSync(mediaPath)
-    if (!stats.isFile()) throw new Error('所选路径不是文件')
-  } catch (error) {
-    await showOperationError('舞台背景不可用', error)
+  const inspection = inspectStageMedia(mediaPath)
+  if (!inspection.available) {
+    await showOperationError('舞台背景不可用', new Error('所选媒体文件不可用'))
     return false
   }
+  const { stats } = inspection
   const previousApprovedMedia = approvedMedia
   const validation = await validateAndApproveMedia(mediaPath, stats)
   if (!validation.ok) {
@@ -637,7 +640,7 @@ async function clearStageBackgroundMedia() {
   return runDiscretePresentationAction('清除舞台背景失败', async () => {
     const snapshot = presentationController.clearMediaPath()
     approvedMedia = null
-    failedMediaSignature = null
+    failedMedia = null
     publishPresentationState(snapshot)
   })
 }
@@ -674,11 +677,7 @@ function beginStagePersonEditing() {
 function isConfiguredMediaAvailable() {
   const mediaPath = getConfiguredMediaPath()
   if (!mediaPath) return false
-  try {
-    return fs.statSync(mediaPath).isFile()
-  } catch {
-    return false
-  }
+  return inspectStageMedia(mediaPath, { failedMedia }).available
 }
 
 function buildMainWindowContextMenu() {
@@ -734,36 +733,38 @@ async function requestApplicationQuit() {
   if (isQuitting || quitConfirmationInProgress) return
   quitConfirmationInProgress = true
   try {
-    const confirmation = await dialog.showMessageBox(mainWindow || setupWindow, {
-      type: 'question',
-      title: '退出应用',
-      message: '确认退出 Open-LLM-VTuber 吗？',
-      buttons: ['取消', '退出'],
-      cancelId: 0,
-      defaultId: 0,
-      noLink: true,
-    })
-    if (confirmation.response !== 1) return
-
-    let saveStatus = flushMainWindowBoundsSave()
-    if (!saveStatus && pendingMainWindowBounds) {
-      saveStatus = persistMainWindowBounds(pendingMainWindowBounds)
-    }
-    while (saveStatus?.state === 'error') {
-      const decision = await dialog.showMessageBox(mainWindow || setupWindow, {
-        type: 'error',
-        title: '最终保存失败',
-        message: saveStatus.message || '窗口位置和尺寸无法保存。',
-        buttons: ['重试', '仍然退出'],
-        cancelId: 0,
-        defaultId: 0,
-        noLink: true,
-      })
-      if (decision.response === 1) break
-      saveStatus = pendingMainWindowBounds
+    const shouldExit = await runPresentationExit({
+      confirmExit: async () => {
+        const confirmation = await dialog.showMessageBox(mainWindow || setupWindow, {
+          type: 'question',
+          title: '退出应用',
+          message: '确认退出 Open-LLM-VTuber 吗？',
+          buttons: ['取消', '退出'],
+          cancelId: 0,
+          defaultId: 0,
+          noLink: true,
+        })
+        return confirmation.response === 1
+      },
+      flushPendingSave: flushMainWindowBoundsSave,
+      hasPendingSave: () => Boolean(pendingMainWindowBounds),
+      retryPendingSave: () => pendingMainWindowBounds
         ? persistMainWindowBounds(pendingMainWindowBounds)
-        : null
-    }
+        : null,
+      resolveSaveFailure: async (saveStatus) => {
+        const decision = await dialog.showMessageBox(mainWindow || setupWindow, {
+          type: 'error',
+          title: '最终保存失败',
+          message: saveStatus.message || '窗口位置和尺寸无法保存。',
+          buttons: ['重试', '仍然退出'],
+          cancelId: 0,
+          defaultId: 0,
+          noLink: true,
+        })
+        return decision.response === 1 ? 'exit' : 'retry'
+      },
+    })
+    if (!shouldExit) return
     isQuitting = true
     app.quit()
   } finally {
@@ -985,7 +986,7 @@ app.whenReady().then(() => {
   ipcMain.on('stage-media-render-failure', (event, payload) => {
     assertMainWindowSender(event)
     if (payload?.media_url !== approvedMedia?.url) return
-    failedMediaSignature = approvedMedia.signature
+    failedMedia = { path: approvedMedia.path, signature: approvedMedia.signature }
     approvedMedia = null
     publishPresentationState()
   })
@@ -1020,18 +1021,12 @@ app.whenReady().then(() => {
         screen.getPrimaryDisplay().workArea,
         MIN_VISIBLE_SIZE
       )
-      try {
-        writeConfig({ window_bounds: corrected })
-        presentationController?.reloadConfig()
-        if (presentationController?.getSnapshot().effective_mode === PRESENTATION_MODES.DESKTOP_PET) {
-          mainWindow.setBounds(corrected)
-          presentationController.updateDesktopBounds(corrected)
-          sendToMainWindow('main-window-bounds-changed', corrected)
-        }
-      } catch (error) {
-        pendingMainWindowBounds = corrected
-        showNonModalError(`窗口位置和尺寸保存失败：${error?.message || error}`)
+      presentationController?.correctDesktopBounds(corrected)
+      if (presentationController?.getSnapshot().effective_mode === PRESENTATION_MODES.DESKTOP_PET) {
+        mainWindow.setBounds(corrected)
+        sendToMainWindow('main-window-bounds-changed', corrected)
       }
+      persistMainWindowBounds(corrected)
     }
     if (presentationController?.handleDisplayRemoved(display.id)) {
       publishPresentationState()

@@ -57,6 +57,14 @@ test('presentation values round-trip while invalid values fall back safely', () 
     center_y: 0.5,
     scale: 1,
   })
+
+  const invalidMedia = normalizeConfig({
+    stage_background: { kind: 'media', media_path: 'relative\\stage.png' },
+  })
+  assert.deepEqual(invalidMedia.stage_background, {
+    kind: 'transparent',
+    media_path: '',
+  })
 })
 
 test('stage media type accepts only the configured image, GIF, and MP4 formats', () => {
