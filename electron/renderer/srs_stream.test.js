@@ -484,6 +484,56 @@ test('reports an ended media track immediately', async () => {
   assert.deepEqual(failures, ['track ended'])
 })
 
+test('reports a media track that arrives after WHEP setup ending immediately', async () => {
+  const failures = []
+  let endTrack
+  let instance
+
+  class LateTrackSdk {
+    constructor() {
+      this.stream = { getTracks: () => [] }
+      this.pc = {
+        connectionState: 'connected',
+        iceConnectionState: 'connected',
+        addEventListener(event, callback) {
+          if (event === 'track') this.onLateTrack = callback
+        },
+      }
+      instance = this
+    }
+
+    async play() {
+      this.pc.onLateTrack({
+        track: {
+          addEventListener(event, callback) {
+            if (event === 'ended') endTrack = callback
+          },
+        },
+      })
+      return { sessionid: 'session-with-late-track' }
+    }
+
+    close() {}
+  }
+
+  const controller = createSrsStreamController({
+    video: { play: async () => {} },
+    showStatus: () => {},
+    getSdkCtor: () => LateTrackSdk,
+    logger: { log() {}, warn() {}, error() {} },
+    autoRetry: false,
+    onConnectionFailed: ({ error }) => failures.push(error.message),
+  })
+
+  await controller.start('http://example.test/rtc/v1/whep/?app=live&stream=a')
+  assert.equal(typeof instance.pc.onLateTrack, 'function')
+  assert.equal(typeof endTrack, 'function')
+
+  endTrack()
+
+  assert.deepEqual(failures, ['track ended'])
+})
+
 test('handles SDK constructor errors by reporting status and scheduling retry', async () => {
   const timers = createTimers()
   const messages = []

@@ -26,7 +26,7 @@
     function maybePublishReady(state) {
       if (
         candidateIndex !== state.index ||
-        !state.item ||
+        !state.stream ||
         !state.playbackReady ||
         !state.frameRendered ||
         state.readyPublished
@@ -35,23 +35,23 @@
       }
       clearFrameTimer(state)
       state.readyPublished = true
-      publish({ type: 'candidate-ready', candidate: state.item })
+      publish({ type: 'candidate-ready', candidate: state.stream })
     }
 
     function handleConnected(state) {
-      if (candidateIndex !== state.index || !state.item) {
+      if (candidateIndex !== state.index || !state.stream) {
         return
       }
       clearFrameTimer(state)
       state.frameTimer = setTimeoutFn(() => {
         state.frameTimer = null
-        if (candidateIndex === state.index && state.item && !state.readyPublished) {
+        if (candidateIndex === state.index && state.stream && !state.readyPublished) {
           handleConnectionFailed(state, new Error(`Three.js first frame timed out after ${frameTimeoutMs} ms`))
         }
       }, frameTimeoutMs)
       publish({
         type: 'candidate-waiting-frame',
-        candidate: state.item,
+        candidate: state.stream,
         deadlineAt: now() + frameTimeoutMs,
       })
     }
@@ -65,7 +65,7 @@
     }
 
     function handleFrameRendered(state) {
-      if (candidateIndex !== state.index || !state.item || !state.playbackReady) {
+      if (candidateIndex !== state.index || !state.stream || !state.playbackReady) {
         return
       }
       state.frameRendered = true
@@ -73,8 +73,8 @@
     }
 
     function handleConnectionFailed(state, failure) {
-      if (currentIndex === state.index && state.item) {
-        const current = state.item
+      if (currentIndex === state.index && state.stream) {
+        const current = state.stream
         currentIndex = null
         closeState(state)
         publish({
@@ -84,10 +84,10 @@
         })
         return
       }
-      if (candidateIndex !== state.index || !state.item) {
+      if (candidateIndex !== state.index || !state.stream) {
         return
       }
-      const candidate = state.item
+      const candidate = state.stream
       candidateIndex = null
       closeState(state)
       publish({
@@ -101,7 +101,7 @@
       const state = {
         index,
         slot,
-        item: null,
+        stream: null,
         attempt: 0,
         playbackReady: false,
         frameRendered: false,
@@ -132,7 +132,7 @@
       state.attempt += 1
       clearFrameTimer(state)
       state.controller.close()
-      state.item = null
+      state.stream = null
       state.playbackReady = false
       state.frameRendered = false
       state.readyPublished = false
@@ -166,7 +166,7 @@
       const state = states[nextIndex]
       closeState(state)
       candidateIndex = nextIndex
-      state.item = candidate
+      state.stream = candidate
       state.playbackReady = false
       state.frameRendered = false
       state.readyPublished = false
@@ -209,7 +209,7 @@
         return false
       }
       const state = states[candidateIndex]
-      if (!state.item || state.item.streamId !== streamId || !state.readyPublished) {
+      if (!state.stream || state.stream.streamId !== streamId || !state.readyPublished) {
         return false
       }
 
@@ -219,7 +219,7 @@
       currentIndex = candidateIndex
       candidateIndex = null
       state.slot.layer.hidden = false
-      publish({ type: 'current-activated', current: state.item })
+      publish({ type: 'current-activated', current: state.stream })
       return true
     }
 

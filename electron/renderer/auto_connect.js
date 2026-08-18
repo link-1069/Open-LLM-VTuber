@@ -4,8 +4,21 @@
     module.exports = api
   }
   root.createAutoConnectController = api.createAutoConnectController
+  root.AUTO_CONNECT_PHASES = api.AUTO_CONNECT_PHASES
 })(typeof globalThis !== 'undefined' ? globalThis : window, function () {
   'use strict'
+
+  const AUTO_CONNECT_PHASES = Object.freeze({
+    ACTIVE: 'active',
+    CLEAR_ERROR: 'clear-error',
+    CONNECTING: 'connecting',
+    COOLDOWN: 'cooldown',
+    DISCOVERING: 'discovering',
+    PROBING: 'probing',
+    RETRYING: 'retrying',
+    SAVING: 'saving',
+    WAITING_FRAME: 'waiting-frame',
+  })
 
   function createAutoConnectController(options) {
     const discoverActiveStream = options.discoverActiveStream
@@ -38,26 +51,45 @@
     let runGeneration = 0
     let stateQueue = Promise.resolve()
     let pendingCurrentUrlRestore = null
+    let configPersistenceError = ''
     const activeRequests = new Map()
     const cooldowns = new Map()
 
     function report(progress) {
-      const normalized = progress.phase === 'retrying' && !progress.deadlineAt
-        ? { ...progress, deadlineAt: now() + 1000 }
-        : progress
+      const errorMessages = [configPersistenceError, progress.error]
+        .filter(Boolean)
+        .filter((message, index, messages) => messages.indexOf(message) === index)
+      const enriched = { ...progress }
+      if (errorMessages.length > 0) {
+        enriched.error = errorMessages.join('；')
+      } else {
+        delete enriched.error
+      }
+      const normalized = enriched.phase === AUTO_CONNECT_PHASES.RETRYING && !enriched.deadlineAt
+        ? { ...enriched, deadlineAt: now() + 1000 }
+        : enriched
       onProgress({ round, ...normalized })
     }
 
     async function clearSavedConfig() {
       try {
         await clearConfig()
+        configPersistenceError = ''
         return true
       } catch (error) {
+        configPersistenceError = `旧配置清除失败：${error?.message || String(error)}`
         report({
-          phase: 'clear-error',
-          error: error?.message || String(error),
+          phase: AUTO_CONNECT_PHASES.CLEAR_ERROR,
+          error: configPersistenceError,
         })
         return false
+      }
+    }
+
+    async function persistSavedConfig(whepUrl, generation = runGeneration) {
+      await saveConfig(whepUrl)
+      if (generation === runGeneration) {
+        configPersistenceError = ''
       }
     }
 
@@ -66,7 +98,7 @@
         await showSetup()
       } catch (error) {
         report({
-          phase: 'retrying',
+          phase: AUTO_CONNECT_PHASES.RETRYING,
           error: error?.message || String(error),
         })
       }
@@ -137,12 +169,20 @@
       return result
     }
 
+    function resetStreamState() {
+      current = null
+      candidate = null
+      readyCandidate = null
+      mainVisible = false
+      pendingCurrentUrlRestore = null
+    }
+
     async function restoreCurrentUrlIfNeeded(streamId) {
       if (!pendingCurrentUrlRestore || pendingCurrentUrlRestore.streamId !== streamId) {
         return
       }
       const target = pendingCurrentUrlRestore
-      await saveConfig(target.whepUrl)
+      await persistSavedConfig(target.whepUrl)
       if (pendingCurrentUrlRestore === target) {
         pendingCurrentUrlRestore = null
       }
@@ -158,7 +198,7 @@
       round += 1
       const retainedStreamId = current?.streamId || candidate?.streamId || ''
       try {
-        report({ phase: 'discovering', streamId: retainedStreamId })
+        report({ phase: AUTO_CONNECT_PHASES.DISCOVERING, streamId: retainedStreamId })
         const streamId = await requestWithTimeout(
           '获取活动流 ID',
           ({ signal }) => discoverActiveStream({ signal }),
@@ -168,7 +208,7 @@
           return
         }
         if (!streamId) {
-          report({ phase: 'retrying', streamId: retainedStreamId, error: '未发现活动流 ID' })
+          report({ phase: AUTO_CONNECT_PHASES.RETRYING, streamId: retainedStreamId, error: '未发现活动流 ID' })
           return
         }
 
@@ -192,7 +232,7 @@
           if (!mainVisible) {
             await showCurrentOrRecover(generation)
           }
-          report({ phase: 'active', streamId })
+          report({ phase: AUTO_CONNECT_PHASES.ACTIVE, streamId })
           return
         }
 
@@ -204,7 +244,7 @@
             }
           }
           report({
-            phase: candidate.phase || 'connecting',
+            phase: candidate.phase || AUTO_CONNECT_PHASES.CONNECTING,
             streamId,
             deadlineAt: candidate.deadlineAt,
           })
@@ -213,7 +253,7 @@
 
         const cooldownUntil = cooldowns.get(streamId) || 0
         if (cooldownUntil > now()) {
-          report({ phase: 'cooldown', streamId, deadlineAt: cooldownUntil })
+          report({ phase: AUTO_CONNECT_PHASES.COOLDOWN, streamId, deadlineAt: cooldownUntil })
           return
         }
         cooldowns.delete(streamId)
@@ -222,7 +262,7 @@
           streamId,
           whepUrl: buildWhepUrl(streamId),
         }
-        report({ phase: 'probing', streamId })
+        report({ phase: AUTO_CONNECT_PHASES.PROBING, streamId })
         const reachable = await requestWithTimeout(
           'SRS 连接测试',
           ({ signal }) => probeConnection(nextCandidate, { signal }),
@@ -232,7 +272,7 @@
           return
         }
         if (!reachable) {
-          report({ phase: 'retrying', streamId, error: 'SRS 连接测试失败' })
+          report({ phase: AUTO_CONNECT_PHASES.RETRYING, streamId, error: 'SRS 连接测试失败' })
           return
         }
 
@@ -245,22 +285,27 @@
           }
           const configSaved = !current
           if (configSaved) {
-            report({ phase: 'saving', streamId })
-            await saveConfig(nextCandidate.whepUrl)
+            report({ phase: AUTO_CONNECT_PHASES.SAVING, streamId })
+            await persistSavedConfig(nextCandidate.whepUrl)
             if (!running || generation !== runGeneration) {
               return
             }
           }
-          candidate = { ...nextCandidate, configSaved, phase: 'connecting', deadlineAt: 0 }
+          candidate = {
+            ...nextCandidate,
+            configSaved,
+            phase: AUTO_CONNECT_PHASES.CONNECTING,
+            deadlineAt: 0,
+          }
           streamManager.prepare(nextCandidate)
-          report({ phase: 'connecting', streamId })
+          report({ phase: AUTO_CONNECT_PHASES.CONNECTING, streamId })
         })
       } catch (error) {
         if (!running || generation !== runGeneration) {
           return
         }
         report({
-          phase: 'retrying',
+          phase: AUTO_CONNECT_PHASES.RETRYING,
           streamId: retainedStreamId,
           error: error?.message || String(error),
         })
@@ -276,14 +321,11 @@
         return
       }
       streamManager.closeAll?.()
-      current = null
-      candidate = null
-      readyCandidate = null
-      mainVisible = false
+      resetStreamState()
       await clearSavedConfig()
       await showSetupContinuing()
       report({
-        phase: 'retrying',
+        phase: AUTO_CONNECT_PHASES.RETRYING,
         streamId: '',
         error: error?.message || String(error),
       })
@@ -312,8 +354,8 @@
       const target = readyCandidate
       commitPromise = (async () => {
         if (!target.configSaved) {
-          report({ phase: 'saving', streamId: target.streamId })
-          await saveConfig(target.whepUrl)
+          report({ phase: AUTO_CONNECT_PHASES.SAVING, streamId: target.streamId })
+          await persistSavedConfig(target.whepUrl)
           target.configSaved = true
         }
         if (
@@ -333,7 +375,7 @@
         if (!mainVisible) {
           await showCurrentOrRecover(generation)
         }
-        report({ phase: 'active', streamId: current.streamId })
+        report({ phase: AUTO_CONNECT_PHASES.ACTIVE, streamId: current.streamId })
       })()
 
       try {
@@ -349,11 +391,15 @@
       }
       if (event.type === 'candidate-connecting' || event.type === 'candidate-waiting-frame') {
         if (event.candidate?.streamId === candidate?.streamId) {
-          candidate.phase = event.type === 'candidate-connecting' ? 'connecting' : 'waiting-frame'
+          candidate.phase = event.type === 'candidate-connecting'
+            ? AUTO_CONNECT_PHASES.CONNECTING
+            : AUTO_CONNECT_PHASES.WAITING_FRAME
           candidate.deadlineAt = event.deadlineAt || 0
         }
         report({
-          phase: event.type === 'candidate-connecting' ? 'connecting' : 'waiting-frame',
+          phase: event.type === 'candidate-connecting'
+            ? AUTO_CONNECT_PHASES.CONNECTING
+            : AUTO_CONNECT_PHASES.WAITING_FRAME,
           streamId: event.candidate?.streamId || '',
           deadlineAt: event.deadlineAt,
         })
@@ -368,7 +414,7 @@
           await clearSavedConfig()
         }
         report({
-          phase: current ? 'active' : 'retrying',
+          phase: current ? AUTO_CONNECT_PHASES.ACTIVE : AUTO_CONNECT_PHASES.RETRYING,
           streamId: failedCandidate.streamId,
           error: event.error?.message || String(event.error || 'WHEP 拉流失败'),
         })
@@ -383,7 +429,7 @@
         await clearSavedConfig()
         await showSetupContinuing()
         report({
-          phase: 'retrying',
+          phase: AUTO_CONNECT_PHASES.RETRYING,
           streamId: failedCurrent.streamId,
           error: event.error?.message || String(event.error || '当前 WHEP 拉流失败'),
         })
@@ -406,7 +452,7 @@
           const generation = runGeneration
           enqueueStateOperation(() => handleStreamEvent(event, generation)).catch((error) => {
             report({
-              phase: 'retrying',
+              phase: AUTO_CONNECT_PHASES.RETRYING,
               error: error?.message || String(error),
             })
           })
@@ -437,11 +483,7 @@
       if (!running || generation !== runGeneration) {
         return
       }
-      current = null
-      pendingCurrentUrlRestore = null
-      mainVisible = false
-      candidate = null
-      readyCandidate = null
+      resetStreamState()
       cooldowns.clear()
       round = 0
       await clearSavedConfig()
@@ -458,11 +500,7 @@
       runGeneration += 1
       abortGeneration(previousGeneration)
       roundInFlight = false
-      current = null
-      pendingCurrentUrlRestore = null
-      candidate = null
-      readyCandidate = null
-      mainVisible = false
+      resetStreamState()
       if (intervalHandle) {
         clearIntervalFn(intervalHandle)
         intervalHandle = null
@@ -481,6 +519,7 @@
   }
 
   return {
+    AUTO_CONNECT_PHASES,
     createAutoConnectController,
   }
 })

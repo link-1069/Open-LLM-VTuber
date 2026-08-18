@@ -1,5 +1,24 @@
 # Electron Desktop
 
+## Automatic digital human connection
+
+The desktop application discovers and displays the active digital human stream automatically. No WHEP URL entry or confirmation button is required.
+
+On startup, the automatic-access window appears immediately while the Python service and hidden main display window start in parallel. The application then:
+
+1. Requests `http://localhost:8500/api/active-streams` and reads `stream.av_stream_id`.
+2. Verifies that `http://127.0.0.1:1985/api/v1` returns HTTP 2xx.
+3. Saves the generated WHEP URL and preloads the stream in the hidden display window.
+4. Shows the digital human only after a decoded video frame has been rendered by Three.js.
+
+Detection starts immediately and repeats every second without overlapping requests. ID discovery and the SRS probe each time out after three seconds. WHEP connection has a ten-second limit, followed by a maximum two-minute wait for the first rendered frame. Failed stream IDs cool down for five seconds while detection continues.
+
+The access window reports the current round, complete stream ID, SRS probe state, failure reason, retry timing, WHEP connection countdown, and first-frame countdown. Configuration-clear errors remain visible while detection continues and disappear after configuration is written successfully.
+
+While the avatar is visible, discovery continues in the background. A validated replacement stream is prepared off-screen and replaces the current stream only after its first rendered frame and configuration save both succeed. Right-click the main window and select **重新检测连接** to discard the current stream and restart automatic detection.
+
+Closing either the automatic-access window or the main display window exits the application and stops its managed Python process.
+
 ## Presentation modes
 
 Right-click the main display window to switch between **桌面宠物模式** and **全屏舞台模式**. Both modes are borderless and use Electron's high-level always-on-top behavior. Fullscreen stage covers the complete display containing the desktop pet, including the taskbar; return to desktop-pet mode before moving the stage to another display.

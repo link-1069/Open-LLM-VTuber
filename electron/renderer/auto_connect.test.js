@@ -110,6 +110,36 @@ test('continues detection when clearing a stale saved URL fails', async () => {
   assert.equal(progress.some((snapshot) => snapshot.phase === 'clear-error'), true)
 })
 
+test('keeps a config-clear error visible until a later config write succeeds', async () => {
+  const intervals = createIntervalHarness()
+  const discovered = ['', 'stream-a']
+  const progress = []
+  const controller = createAutoConnectController({
+    discoverActiveStream: async () => discovered.shift() || '',
+    probeConnection: async () => true,
+    buildWhepUrl: (streamId) => `whep://${streamId}`,
+    clearConfig: async () => { throw new Error('disk locked') },
+    saveConfig: async () => {},
+    streamManager: {
+      subscribe() { return () => {} },
+      prepare() {},
+    },
+    setIntervalFn: intervals.setIntervalFn,
+    clearIntervalFn: intervals.clearIntervalFn,
+    onProgress: (snapshot) => progress.push(snapshot),
+  })
+
+  await controller.start()
+
+  assert.equal(progress.at(-1).phase, 'retrying')
+  assert.match(progress.at(-1).error, /disk locked/)
+
+  await intervals.scheduled[0].fn()
+
+  assert.equal(progress.at(-1).phase, 'connecting')
+  assert.equal(progress.at(-1).error, undefined)
+})
+
 test('skips interval ticks while the previous detection round is still running', async () => {
   const intervals = createIntervalHarness()
   let resolveDiscovery

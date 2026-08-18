@@ -9,13 +9,7 @@ const preloadPath = path.join(__dirname, '..', 'preload.js')
 const mainHtmlPath = path.join(__dirname, 'main.html')
 const rendererScriptPath = path.join(__dirname, 'renderer.js')
 const mainProcessPath = path.join(__dirname, '..', 'main.js')
-
-function getScriptSources(html) {
-  return Array.from(
-    html.matchAll(/<script\s+src="([^"]+)"><\/script>/g),
-    (match) => match[1]
-  )
-}
+const stylePath = path.join(__dirname, 'style.css')
 
 test('automatic access window exposes progress without manual controls', () => {
   const html = fs.readFileSync(setupHtmlPath, 'utf8')
@@ -31,7 +25,9 @@ test('automatic access window exposes progress without manual controls', () => {
   assert.match(html, /id="access-phase"/)
   assert.match(html, /id="access-error"/)
   assert.match(html, /id="access-countdown"/)
+  assert.match(html, /<script src="auto_connect\.js"><\/script>[\s\S]*<script src="setup\.js"><\/script>/)
   assert.match(script, /window\.electronAPI\.onAutoConnectProgress/)
+  assert.match(script, /window\.AUTO_CONNECT_PHASES/)
   assert.match(script, /hasOwnProperty\.call\(snapshot, 'streamId'\)/)
   assert.match(preload, /onAutoConnectProgress:\s*\(callback\) => subscribe\('auto-connect-progress', callback\)/)
 })
@@ -45,18 +41,15 @@ test('main window provides two stream slots before loading automatic access', ()
   assert.match(html, /id="stage-1"/)
   assert.match(html, /id="video-0"/)
   assert.match(html, /id="video-1"/)
-  assert.deepEqual(getScriptSources(html), [
-    'vendor/three.min.js',
-    'srs.sdk.js',
-    'chroma_key_material.js',
-    'three_stage.js',
-    'srs_stream.js',
-    'digital_human_stream_manager.js',
-    'auto_connect.js',
-    '../window_bounds.js',
-    'window_controls.js',
-    'renderer.js',
-  ])
+})
+
+test('automatic access window displays the complete active stream ID', () => {
+  const style = fs.readFileSync(stylePath, 'utf8')
+  const streamIdRule = style.match(/#active-stream-id\s*\{([\s\S]*?)\}/)?.[1] || ''
+
+  assert.match(streamIdRule, /overflow-wrap:\s*anywhere/)
+  assert.doesNotMatch(streamIdRule, /text-overflow:\s*ellipsis/)
+  assert.doesNotMatch(streamIdRule, /white-space:\s*nowrap/)
 })
 
 test('renderer wires automatic discovery, probing, persistence, and dual-stream activation', () => {

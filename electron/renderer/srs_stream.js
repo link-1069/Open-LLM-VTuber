@@ -204,6 +204,29 @@
 
     function attachDisconnectHandlers(activeSdk, whepUrl, activeAttemptId) {
       const pc = activeSdk && activeSdk.pc
+      const observedTracks = new WeakSet()
+
+      function observeTrack(track) {
+        if (!track || observedTracks.has(track)) {
+          return
+        }
+        observedTracks.add(track)
+        const onEnded = function () {
+          handleStreamDisconnected(whepUrl, activeAttemptId, 'track ended')
+        }
+        if (typeof track.addEventListener === 'function') {
+          track.addEventListener('ended', onEnded, { once: true })
+        } else {
+          const previousOnEnded = track.onended
+          track.onended = function (...args) {
+            if (typeof previousOnEnded === 'function') {
+              previousOnEnded.apply(this, args)
+            }
+            onEnded()
+          }
+        }
+      }
+
       const onConnectionStateChange = function () {
         if (!pc) {
           return
@@ -236,21 +259,23 @@
       if (pc) {
         pc.onconnectionstatechange = onConnectionStateChange
         pc.oniceconnectionstatechange = onConnectionStateChange
+        if (typeof pc.addEventListener === 'function') {
+          pc.addEventListener('track', (event) => observeTrack(event.track))
+        } else {
+          const previousOnTrack = pc.ontrack
+          pc.ontrack = function (event) {
+            if (typeof previousOnTrack === 'function') {
+              previousOnTrack.call(this, event)
+            }
+            observeTrack(event.track)
+          }
+        }
       }
 
       if (!activeSdk.stream || typeof activeSdk.stream.getTracks !== 'function') {
         return
       }
-      activeSdk.stream.getTracks().forEach(function (track) {
-        const onEnded = function () {
-          handleStreamDisconnected(whepUrl, activeAttemptId, 'track ended')
-        }
-        if (typeof track.addEventListener === 'function') {
-          track.addEventListener('ended', onEnded, { once: true })
-        } else {
-          track.onended = onEnded
-        }
-      })
+      activeSdk.stream.getTracks().forEach(observeTrack)
     }
 
     async function start(whepUrl, forceRestart = false) {

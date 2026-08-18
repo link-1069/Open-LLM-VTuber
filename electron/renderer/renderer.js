@@ -120,7 +120,11 @@ function persistWhepUrl(whepUrl) {
 
 function reportAutoConnectProgress(snapshot) {
   if (snapshot.error) {
-    console.warn('Automatic access attempt failed:', snapshot.error)
+    console.warn('Automatic access attempt failed; see the access window for details.', {
+      phase: snapshot.phase,
+      round: snapshot.round,
+      streamId: snapshot.streamId,
+    })
   }
   window.electronAPI.reportAutoConnectProgress(snapshot)
 }

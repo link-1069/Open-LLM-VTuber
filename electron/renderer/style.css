@@ -91,12 +91,11 @@ body {
 
 #active-stream-id {
   display: block;
-  overflow: hidden;
+  overflow-wrap: anywhere;
   color: #dce8f8;
   font-family: Consolas, "Cascadia Mono", monospace;
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .access-detail {

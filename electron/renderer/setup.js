@@ -1,5 +1,6 @@
 'use strict'
 
+const AUTO_CONNECT_PHASES = window.AUTO_CONNECT_PHASES
 const roundEl = document.getElementById('detection-round')
 const discoveryEl = document.getElementById('discovery-status')
 const streamIdEl = document.getElementById('active-stream-id')
@@ -46,45 +47,45 @@ function renderProgress(snapshot) {
   setError(snapshot.error)
 
   switch (snapshot.phase) {
-    case 'discovering':
+    case AUTO_CONNECT_PHASES.DISCOVERING:
       setBadge(discoveryEl, '检测中', 'running')
       setBadge(probeEl, '等待 ID', 'waiting')
       phaseEl.textContent = '正在获取活动流 ID…'
       break
-    case 'probing':
+    case AUTO_CONNECT_PHASES.PROBING:
       setBadge(discoveryEl, '已获取', 'ok')
       setBadge(probeEl, '测试中', 'running')
       phaseEl.textContent = '正在测试 SRS HTTP 服务…'
       break
-    case 'saving':
+    case AUTO_CONNECT_PHASES.SAVING:
       setBadge(discoveryEl, '已获取', 'ok')
       setBadge(probeEl, '已连接', 'ok')
       phaseEl.textContent = '正在保存已验证的连接…'
       break
-    case 'connecting':
+    case AUTO_CONNECT_PHASES.CONNECTING:
       setBadge(discoveryEl, '已获取', 'ok')
       setBadge(probeEl, '已连接', 'ok')
       phaseEl.textContent = '正在建立 WHEP 连接…'
       deadlineLabel = 'WHEP 建连'
       break
-    case 'waiting-frame':
+    case AUTO_CONNECT_PHASES.WAITING_FRAME:
       setBadge(discoveryEl, '持续检测', 'running')
       setBadge(probeEl, '已连接', 'ok')
       phaseEl.textContent = 'WHEP 已连接，正在等待数字人画面…'
       deadlineLabel = '等待首帧'
       break
-    case 'cooldown':
+    case AUTO_CONNECT_PHASES.COOLDOWN:
       setBadge(discoveryEl, '已获取', 'ok')
       setBadge(probeEl, '暂缓重试', 'waiting')
       phaseEl.textContent = '该活动流正在冷却，继续实时检测…'
       deadlineLabel = '冷却'
       break
-    case 'active':
+    case AUTO_CONNECT_PHASES.ACTIVE:
       setBadge(discoveryEl, '持续检测', 'running')
       setBadge(probeEl, '已连接', 'ok')
       phaseEl.textContent = '数字人画面已就绪'
       break
-    case 'clear-error':
+    case AUTO_CONNECT_PHASES.CLEAR_ERROR:
       setBadge(discoveryEl, '继续检测', 'running')
       setBadge(probeEl, '等待 ID', 'waiting')
       phaseEl.textContent = '旧配置清除失败，自动检测仍在继续'
