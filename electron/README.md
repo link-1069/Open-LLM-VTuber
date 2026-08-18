@@ -25,7 +25,9 @@ Right-click the main display window to switch between **桌面宠物模式** and
 
 The **舞台背景** submenu can keep the stage transparent or reference a local PNG, JPG/JPEG, WebP, BMP, GIF, or MP4 file. Media remains at its original path, uses centered `cover`, and is decoded before a selection is saved. MP4 files autoplay silently and loop. Missing saved media falls back to transparency and is checked every three seconds while the fullscreen media background is relevant. Clearing the selected path requires confirmation.
 
-Select **编辑人物大小和位置…** to open the visual editor. Drag the visible frame to move the person and use the mouse wheel over the frame to scale it. Only **保存** persists the relative layout; **取消** restores the last saved layout. Starting the editor from desktop-pet mode uses a temporary fullscreen preview and returns to the desktop pet after either action.
+Select **编辑全屏舞台人物大小和位置…** to open the stage editor. Drag the visible frame to move the person, drag its eight handles to change width and height independently, or use the mouse wheel for proportional scaling. Only **保存** persists the relative layout; **取消** restores the last saved layout. Starting this editor from desktop-pet mode uses a temporary fullscreen preview and returns to the desktop pet after either action.
+
+In desktop-pet mode, select **编辑桌宠大小和位置…** to show a visual window frame. Drag the frame to move the pet and drag an edge or corner to change its width and height. These changes remain a preview until **保存** is clicked; **取消** restores the entry bounds without writing them to configuration.
 
 Presentation mode, background selection, and person layout are saved immediately. Every application exit entry point asks for confirmation and performs a final desktop-bounds save check.
 

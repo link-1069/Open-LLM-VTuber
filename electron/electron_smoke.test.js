@@ -137,6 +137,7 @@ test('automatically discovers, renders, saves, and shows a digital human stream'
       '../presentation_contract.js',
       '../presentation_layout.js',
       'window_controls.js',
+      'desktop_pet_editor.js',
       'stage_view.js',
       'renderer.js',
     ])
@@ -241,6 +242,55 @@ test('automatically discovers, renders, saves, and shows a digital human stream'
       'http://127.0.0.1:1985/rtc/v1/whep/?app=live&stream=smoke-stream'
     )
 
+    await mainPage.evaluate(() => window.electronAPI.beginDesktopPetEditing())
+    await mainPage.waitForFunction(() => !document.getElementById('desktop-pet-editor').hidden)
+    const desktopResizeHandle = mainPage.locator('[data-desktop-resize="se"]')
+    const desktopResizeBox = await desktopResizeHandle.boundingBox()
+    assert.ok(desktopResizeBox)
+    await mainPage.mouse.move(
+      desktopResizeBox.x + desktopResizeBox.width / 2,
+      desktopResizeBox.y + desktopResizeBox.height / 2
+    )
+    await mainPage.mouse.down()
+    await mainPage.mouse.move(
+      desktopResizeBox.x + desktopResizeBox.width / 2 + 30,
+      desktopResizeBox.y + desktopResizeBox.height / 2 + 20,
+      { steps: 3 }
+    )
+    await mainPage.mouse.up()
+    const previewBounds = await app.evaluate(({ BrowserWindow }) => {
+      return BrowserWindow.getAllWindows()
+        .find((candidate) => candidate.webContents.getURL().endsWith('/renderer/main.html'))
+        .getBounds()
+    })
+    assert.ok(previewBounds.width > nextWidth)
+    assert.ok(previewBounds.height > originalBounds.height)
+    assert.equal(JSON.parse(fs.readFileSync(configPath, 'utf8')).window_bounds.width, nextWidth)
+    await mainPage.evaluate(() => window.electronAPI.cancelDesktopPetEditing())
+    await mainPage.waitForFunction(() => document.getElementById('desktop-pet-editor').hidden)
+    const restoredAfterCancel = await app.evaluate(({ BrowserWindow }) => {
+      return BrowserWindow.getAllWindows()
+        .find((candidate) => candidate.webContents.getURL().endsWith('/renderer/main.html'))
+        .getBounds()
+    })
+    assert.equal(restoredAfterCancel.width, nextWidth)
+
+    const editedDesktopBounds = {
+      x: restoredAfterCancel.x,
+      y: restoredAfterCancel.y,
+      width: nextWidth + 40,
+      height: Math.max(240, restoredAfterCancel.height - 40),
+    }
+    await mainPage.evaluate(() => window.electronAPI.beginDesktopPetEditing())
+    assert.equal((await mainPage.evaluate(
+      (bounds) => window.electronAPI.updateDesktopPetBounds(bounds),
+      editedDesktopBounds
+    )).ok, true)
+    assert.equal(JSON.parse(fs.readFileSync(configPath, 'utf8')).window_bounds.width, nextWidth)
+    await mainPage.evaluate(() => window.electronAPI.saveDesktopPetEditing())
+    assert.equal(JSON.parse(fs.readFileSync(configPath, 'utf8')).window_bounds.width, editedDesktopBounds.width)
+    mark('desktop visual edit saved explicitly')
+
     await mainPage.evaluate(() => window.electronAPI.setPresentationMode('fullscreen_stage'))
     mark('fullscreen requested')
     try {
@@ -299,7 +349,7 @@ test('automatically discovers, renders, saves, and shows a digital human stream'
       await window.electronAPI.beginStagePersonEditing()
       return result
     })
-    assert.equal(desktopResult.width, nextWidth)
+    assert.equal(desktopResult.width, editedDesktopBounds.width)
     assert.equal(desktopResult.backgroundChildren, 0)
     mark('desktop restored')
 
@@ -307,14 +357,21 @@ test('automatically discovers, renders, saves, and shows a digital human stream'
       return document.body.dataset.presentationMode === 'fullscreen_stage' &&
         !document.getElementById('stage-person-editor').hidden
     }, null, { timeout: 15000 })
-    await mainPage.evaluate(() => {
-      document.getElementById('stage-person-frame').dispatchEvent(new WheelEvent('wheel', {
-        deltaY: -100,
-        bubbles: true,
-        cancelable: true,
-      }))
-      document.getElementById('stage-person-save').click()
-    })
+    const eastHandle = mainPage.locator('[data-stage-resize="e"]')
+    const eastHandleBox = await eastHandle.boundingBox()
+    assert.ok(eastHandleBox)
+    await mainPage.mouse.move(
+      eastHandleBox.x + eastHandleBox.width / 2,
+      eastHandleBox.y + eastHandleBox.height / 2
+    )
+    await mainPage.mouse.down()
+    await mainPage.mouse.move(
+      eastHandleBox.x + eastHandleBox.width / 2 - 120,
+      eastHandleBox.y + eastHandleBox.height / 2,
+      { steps: 5 }
+    )
+    await mainPage.mouse.up()
+    await mainPage.locator('#stage-person-save').click()
     await mainPage.waitForFunction(
       () => document.body.dataset.presentationMode === 'desktop_pet',
       null,
@@ -322,7 +379,8 @@ test('automatically discovers, renders, saves, and shows a digital human stream'
     )
     const finalConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'))
     assert.equal(finalConfig.presentation_mode, 'desktop_pet')
-    assert.ok(finalConfig.stage_person_layout.scale > 1)
+    assert.ok(finalConfig.stage_person_layout.width_scale < 1)
+    assert.equal(finalConfig.stage_person_layout.height_scale, 1)
     mark('person layout saved')
     assert.deepEqual(fatalErrors, [])
   } finally {

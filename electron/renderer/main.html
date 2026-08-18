@@ -189,7 +189,9 @@
     #window-save-status[data-state="error"] { color: #ff9c9c; }
 
     body[data-presentation-mode="fullscreen_stage"] #window-controls-hotspot,
-    body[data-presentation-mode="fullscreen_stage"] #window-controls-panel {
+    body[data-presentation-mode="fullscreen_stage"] #window-controls-panel,
+    body[data-desktop-pet-editing="true"] #window-controls-hotspot,
+    body[data-desktop-pet-editing="true"] #window-controls-panel {
       display: none;
     }
 
@@ -214,6 +216,27 @@
       touch-action: none;
     }
 
+    .stage-person-resize-handle,
+    .desktop-pet-resize-handle {
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #fff;
+      border-radius: 3px;
+      background: #258fe8;
+      pointer-events: auto;
+      touch-action: none;
+    }
+
+    [data-stage-resize="n"], [data-desktop-resize="n"] { top: -8px; left: calc(50% - 7px); cursor: ns-resize; }
+    [data-stage-resize="s"], [data-desktop-resize="s"] { bottom: -8px; left: calc(50% - 7px); cursor: ns-resize; }
+    [data-stage-resize="e"], [data-desktop-resize="e"] { top: calc(50% - 7px); right: -8px; cursor: ew-resize; }
+    [data-stage-resize="w"], [data-desktop-resize="w"] { top: calc(50% - 7px); left: -8px; cursor: ew-resize; }
+    [data-stage-resize="ne"], [data-desktop-resize="ne"] { top: -8px; right: -8px; cursor: nesw-resize; }
+    [data-stage-resize="nw"], [data-desktop-resize="nw"] { top: -8px; left: -8px; cursor: nwse-resize; }
+    [data-stage-resize="se"], [data-desktop-resize="se"] { right: -8px; bottom: -8px; cursor: nwse-resize; }
+    [data-stage-resize="sw"], [data-desktop-resize="sw"] { left: -8px; bottom: -8px; cursor: nesw-resize; }
+
     #stage-person-actions {
       position: absolute;
       left: 50%;
@@ -236,6 +259,53 @@
     }
 
     #stage-person-save { background: rgba(31, 112, 205, 0.95) !important; }
+
+    #desktop-pet-editor {
+      position: absolute;
+      inset: 0;
+      z-index: 10015;
+      pointer-events: none;
+      -webkit-app-region: no-drag;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+
+    #desktop-pet-editor[hidden] { display: none; }
+
+    #desktop-pet-frame {
+      position: absolute;
+      inset: 8px;
+      border: 2px solid #67e8a8;
+      background: rgba(52, 211, 153, 0.06);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 18px rgba(52, 211, 153, 0.55);
+      cursor: move;
+      pointer-events: auto;
+      touch-action: none;
+      -webkit-app-region: no-drag;
+    }
+
+    #desktop-pet-actions {
+      position: absolute;
+      left: 50%;
+      bottom: 24px;
+      display: flex;
+      gap: 10px;
+      transform: translateX(-50%);
+      pointer-events: auto;
+      -webkit-app-region: no-drag;
+    }
+
+    #desktop-pet-actions button {
+      min-width: 82px;
+      padding: 9px 18px;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      border-radius: 9px;
+      background: rgba(20, 25, 34, 0.92);
+      color: #fff;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    #desktop-pet-save { background: rgba(16, 128, 86, 0.95) !important; }
 
     #non-modal-notification {
       position: absolute;
@@ -268,10 +338,35 @@
     <video id="video-1" class="stream-video" autoplay playsinline muted></video>
   </div>
   <section id="stage-person-editor" hidden>
-    <div id="stage-person-frame" aria-label="人物画面编辑框"></div>
+    <div id="stage-person-frame" aria-label="人物画面编辑框">
+      <i class="stage-person-resize-handle" data-stage-resize="n"></i>
+      <i class="stage-person-resize-handle" data-stage-resize="ne"></i>
+      <i class="stage-person-resize-handle" data-stage-resize="e"></i>
+      <i class="stage-person-resize-handle" data-stage-resize="se"></i>
+      <i class="stage-person-resize-handle" data-stage-resize="s"></i>
+      <i class="stage-person-resize-handle" data-stage-resize="sw"></i>
+      <i class="stage-person-resize-handle" data-stage-resize="w"></i>
+      <i class="stage-person-resize-handle" data-stage-resize="nw"></i>
+    </div>
     <div id="stage-person-actions">
       <button id="stage-person-save" type="button">保存</button>
       <button id="stage-person-cancel" type="button">取消</button>
+    </div>
+  </section>
+  <section id="desktop-pet-editor" hidden>
+    <div id="desktop-pet-frame" aria-label="桌面宠物窗口编辑框">
+      <i class="desktop-pet-resize-handle" data-desktop-resize="n"></i>
+      <i class="desktop-pet-resize-handle" data-desktop-resize="ne"></i>
+      <i class="desktop-pet-resize-handle" data-desktop-resize="e"></i>
+      <i class="desktop-pet-resize-handle" data-desktop-resize="se"></i>
+      <i class="desktop-pet-resize-handle" data-desktop-resize="s"></i>
+      <i class="desktop-pet-resize-handle" data-desktop-resize="sw"></i>
+      <i class="desktop-pet-resize-handle" data-desktop-resize="w"></i>
+      <i class="desktop-pet-resize-handle" data-desktop-resize="nw"></i>
+    </div>
+    <div id="desktop-pet-actions">
+      <button id="desktop-pet-save" type="button">保存</button>
+      <button id="desktop-pet-cancel" type="button">取消</button>
     </div>
   </section>
   <div id="non-modal-notification" role="status" aria-live="polite" hidden></div>
@@ -335,6 +430,7 @@
   <script src="../presentation_contract.js"></script>
   <script src="../presentation_layout.js"></script>
   <script src="window_controls.js"></script>
+  <script src="desktop_pet_editor.js"></script>
   <script src="stage_view.js"></script>
   <script src="renderer.js"></script>
 </body>

@@ -34,6 +34,7 @@ test('loads Three.js and renderer modules before the main renderer', () => {
     '../presentation_contract.js',
     '../presentation_layout.js',
     'window_controls.js',
+    'desktop_pet_editor.js',
     'stage_view.js',
     'renderer.js',
   ])
@@ -58,6 +59,8 @@ test('main window includes an invisible hotspot and in-window control panel', ()
   assert.match(controlsScript, /createTripleClickGate\(5000\)/)
   assert.match(preloadScript, /getMainWindowState:\s*\(\) => ipcRenderer\.invoke\('get-main-window-state'\)/)
   assert.match(preloadScript, /setMainWindowBounds:\s*\(bounds\) => ipcRenderer\.invoke\('set-main-window-bounds', bounds\)/)
+  assert.match(preloadScript, /saveDesktopPetEditing:/)
+  assert.match(preloadScript, /cancelDesktopPetEditing:/)
   assert.match(mainScript, /ipcMain\.handle\('get-main-window-state'/)
   assert.match(mainScript, /ipcMain\.handle\('set-main-window-bounds'/)
   assert.match(mainScript, /ipcMain\.handle\('reset-main-window-bounds'/)
@@ -90,13 +93,17 @@ test('main window exposes both presentation modes, stage controls, and a unified
   assert.match(menuScript, /label: '桌面宠物模式'/)
   assert.match(menuScript, /label: '全屏舞台模式'/)
   assert.match(menuScript, /label: '舞台背景'/)
-  assert.match(menuScript, /label: '编辑人物大小和位置…'/)
+  assert.match(menuScript, /label: '编辑桌宠大小和位置…'/)
+  assert.match(menuScript, /label: '编辑全屏舞台人物大小和位置…'/)
   assert.match(menuScript, /label: '退出应用…'/)
   assert.match(mainScript, /setAlwaysOnTop\(true, 'screen-saver'\)/)
   assert.match(preloadScript, /getPresentationState:/)
   assert.match(preloadScript, /saveStagePersonLayout:/)
   assert.match(html, /id="stage-background"/)
   assert.match(html, /id="stage-person-editor"[^>]*hidden/)
+  assert.match(html, /id="desktop-pet-editor"[^>]*hidden/)
+  assert.match(html, /data-stage-resize="se"/)
+  assert.match(html, /data-desktop-resize="se"/)
   assert.doesNotMatch(html, /id="subtitle"/)
   assert.doesNotMatch(rendererScript, /showSubtitle/)
 })

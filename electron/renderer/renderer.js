@@ -20,6 +20,7 @@ let unsubscribeMediaValidation = null
 let unsubscribeNotification = null
 let notificationTimer = null
 let stageView = null
+let desktopPetEditor = null
 
 window.__openLlmVtuberStageReady = false
 window.__openLlmVtuberStreamControllerReady = false
@@ -43,8 +44,14 @@ function initPresentation() {
     slots,
     electronAPI: window.electronAPI,
   })
+  desktopPetEditor = window.createDesktopPetEditor({
+    document,
+    window,
+    electronAPI: window.electronAPI,
+  })
   unsubscribePresentation = window.electronAPI.onPresentationStateChanged((snapshot) => {
     stageView.applyPresentationState(snapshot)
+    desktopPetEditor.applyPresentationState(snapshot)
   })
   unsubscribeMediaValidation = window.electronAPI.onValidateStageMedia((request) => {
     stageView.validateMedia(request)
@@ -60,7 +67,10 @@ function initPresentation() {
   })
   unsubscribeNotification = window.electronAPI.onNonModalNotification(showNonModalNotification)
   window.electronAPI.getPresentationState()
-    .then((snapshot) => stageView.applyPresentationState(snapshot))
+    .then((snapshot) => {
+      stageView.applyPresentationState(snapshot)
+      desktopPetEditor.applyPresentationState(snapshot)
+    })
     .catch((error) => console.error('Presentation initialization failed:', error))
   window.__openLlmVtuberPresentationReady = true
 }
@@ -246,6 +256,7 @@ window.addEventListener('beforeunload', () => {
   unsubscribeMediaValidation?.()
   unsubscribeNotification?.()
   stageView?.dispose()
+  desktopPetEditor?.dispose()
   autoConnectController?.stop()
   streamManager?.dispose()
   if (ws) {

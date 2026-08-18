@@ -89,7 +89,7 @@ function createHarness() {
   return { apiCalls, body, cancel, createdElements, frame, save, slots, view, windowObject }
 }
 
-test('fullscreen stage applies an aspect-preserving relative person frame', () => {
+test('fullscreen stage applies an independently sized relative person frame', () => {
   const harness = createHarness()
 
   harness.view.applyPresentationState({
@@ -97,28 +97,28 @@ test('fullscreen stage applies an aspect-preserving relative person frame', () =
     previewing_stage: false,
     editing_person: false,
     stage_background: { kind: 'transparent', media_path: '' },
-    stage_person_layout: { center_x: 0.25, center_y: 0.75, scale: 0.5 },
+    stage_person_layout: { center_x: 0.25, center_y: 0.75, width_scale: 2, height_scale: 0.5 },
   })
 
   assert.equal(harness.body.dataset.presentationMode, 'fullscreen_stage')
   for (const slot of harness.slots) {
     assert.deepEqual(slot.layer.style, {
-      left: '318px',
+      left: '-168px',
       top: '540px',
-      width: '324px',
+      width: '1296px',
       height: '540px',
     })
   }
 })
 
-test('person editor drags and scales the frame before explicit save', async () => {
+test('person editor drags and proportionally wheel-scales before explicit save', async () => {
   const harness = createHarness()
   harness.view.applyPresentationState({
     effective_mode: 'fullscreen_stage',
     previewing_stage: false,
     editing_person: true,
     stage_background: { kind: 'transparent', media_path: '' },
-    stage_person_layout: { center_x: 0.5, center_y: 0.5, scale: 1 },
+    stage_person_layout: { center_x: 0.5, center_y: 0.5, width_scale: 1, height_scale: 1 },
   })
 
   harness.frame.listeners.pointerdown({ clientX: 960, clientY: 540, pointerId: 1 })
@@ -133,7 +133,43 @@ test('person editor drags and scales the frame before explicit save', async () =
   assert.equal(harness.apiCalls[0][0], 'saveStagePersonLayout')
   assert.equal(harness.apiCalls[0][1].center_x, 0.6)
   assert.equal(harness.apiCalls[0][1].center_y, 0.6)
-  assert.ok(Math.abs(harness.apiCalls[0][1].scale - 2) < 0.000001)
+  assert.ok(Math.abs(harness.apiCalls[0][1].width_scale - 2) < 0.000001)
+  assert.ok(Math.abs(harness.apiCalls[0][1].height_scale - 2) < 0.000001)
+})
+
+test('person editor resize handles change width and height independently', async () => {
+  const harness = createHarness()
+  harness.view.applyPresentationState({
+    effective_mode: 'fullscreen_stage',
+    previewing_stage: false,
+    editing_person: true,
+    stage_background: { kind: 'transparent', media_path: '' },
+    stage_person_layout: { center_x: 0.5, center_y: 0.5, width_scale: 1, height_scale: 1 },
+  })
+
+  harness.frame.listeners.pointerdown({
+    clientX: 1284,
+    clientY: 540,
+    pointerId: 2,
+    target: { dataset: { stageResize: 'e' } },
+  })
+  harness.windowObject.listeners.pointermove({ clientX: 1608, clientY: 540, pointerId: 2 })
+  harness.windowObject.listeners.pointerup({ pointerId: 2 })
+  harness.frame.listeners.pointerdown({
+    clientX: 1122,
+    clientY: 1080,
+    pointerId: 3,
+    target: { dataset: { stageResize: 's' } },
+  })
+  harness.windowObject.listeners.pointermove({ clientX: 1122, clientY: 1350, pointerId: 3 })
+  harness.windowObject.listeners.pointerup({ pointerId: 3 })
+  await harness.save.listeners.click()
+
+  const saved = harness.apiCalls[0][1]
+  assert.ok(Math.abs(saved.width_scale - 1.5) < 0.000001)
+  assert.ok(Math.abs(saved.height_scale - 1.25) < 0.000001)
+  assert.ok(Math.abs(saved.center_x - 0.584375) < 0.000001)
+  assert.equal(saved.center_y, 0.625)
 })
 
 test('fullscreen MP4 background is silent, looping, cover-fitted, and released on desktop', () => {
@@ -143,7 +179,7 @@ test('fullscreen MP4 background is silent, looping, cover-fitted, and released o
     previewing_stage: false,
     editing_person: false,
     stage_background: { kind: 'media', media_path: 'D:\\media\\loop.mp4' },
-    stage_person_layout: { center_x: 0.5, center_y: 0.5, scale: 1 },
+    stage_person_layout: { center_x: 0.5, center_y: 0.5, width_scale: 1, height_scale: 1 },
     media_available: true,
     media_type: 'video',
     media_url: 'file:///D:/media/loop.mp4?v=1',
@@ -163,7 +199,7 @@ test('fullscreen MP4 background is silent, looping, cover-fitted, and released o
     previewing_stage: false,
     editing_person: false,
     stage_background: { kind: 'media', media_path: 'D:\\media\\loop.mp4' },
-    stage_person_layout: { center_x: 0.5, center_y: 0.5, scale: 1 },
+    stage_person_layout: { center_x: 0.5, center_y: 0.5, width_scale: 1, height_scale: 1 },
     media_available: true,
     media_type: 'video',
     media_url: 'file:///D:/media/loop.mp4?v=1',

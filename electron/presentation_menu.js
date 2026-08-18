@@ -39,7 +39,12 @@ function createPresentationMenuTemplate(snapshot, mediaAvailable, actions) {
         { label: '清除已选媒体…', enabled: Boolean(mediaPath), click: actions.clearMedia },
       ],
     },
-    { label: '编辑人物大小和位置…', click: actions.editPerson },
+    {
+      label: '编辑桌宠大小和位置…',
+      enabled: snapshot.effective_mode === PRESENTATION_MODES.DESKTOP_PET,
+      click: actions.editDesktopPet,
+    },
+    { label: '编辑全屏舞台人物大小和位置…', click: actions.editPerson },
     { label: '恢复默认人物布局…', click: actions.resetPerson },
     { type: 'separator' },
     { ...actions.restart },

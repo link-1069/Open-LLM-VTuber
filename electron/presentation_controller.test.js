@@ -92,13 +92,15 @@ test('saving a temporary person preview persists relative layout and returns to 
   const saved = await harness.controller.savePersonLayout({
     center_x: 0.2,
     center_y: 0.8,
-    scale: 3,
+    width_scale: 3,
+    height_scale: 2,
   })
 
   assert.deepEqual(harness.getStoredConfig().stage_person_layout, {
     center_x: 0.2,
     center_y: 0.8,
-    scale: 3,
+    width_scale: 3,
+    height_scale: 2,
   })
   assert.equal(saved.effective_mode, 'desktop_pet')
   assert.equal(saved.editing_person, false)
@@ -228,7 +230,7 @@ test('a failed desktop save restores the prior fullscreen stage', async () => {
 
 test('reset person layout is an immediate durable discrete setting', () => {
   const harness = createHarness({
-    stage_person_layout: { center_x: 0.2, center_y: 0.3, scale: 4 },
+    stage_person_layout: { center_x: 0.2, center_y: 0.3, width_scale: 4, height_scale: 2 },
   })
 
   harness.controller.resetPersonLayout()
@@ -236,7 +238,8 @@ test('reset person layout is an immediate durable discrete setting', () => {
   assert.deepEqual(harness.getStoredConfig().stage_person_layout, {
     center_x: 0.5,
     center_y: 0.5,
-    scale: 1,
+    width_scale: 1,
+    height_scale: 1,
   })
 })
 

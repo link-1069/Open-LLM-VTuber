@@ -5,17 +5,17 @@
 
 ## Problem Statement
 
-当前 Electron 主展示窗口只提供桌面宠物形态。用户无法在不离开应用的情况下切换到覆盖当前显示器的全屏舞台，也无法为全屏展示设置透明背景或自定义本地背景媒体。现有窗口边界是唯一的窗口状态；如果直接增加全屏切换，全屏边界会污染桌宠位置和尺寸。当前数字人视频还会随窗口比例拉伸，在宽屏舞台上产生人物变形。
+当前 Electron 主展示窗口只提供桌面宠物形态。用户无法在不离开应用的情况下切换到覆盖当前显示器的全屏舞台，也无法为全屏展示设置透明背景或自定义本地背景媒体。现有窗口边界是唯一的窗口状态；如果直接增加全屏切换，全屏边界会污染桌宠位置和尺寸。人物编辑也缺少独立宽高控制，桌宠无边框窗口的尺寸入口不易发现。
 
 用户需要通过右键完成呈现模式切换、舞台背景管理和人物构图调整，并要求模式、背景、人物布局和桌宠边界在重启后可靠恢复。全屏舞台必须无边框、覆盖任务栏、高层级置顶且不穿透鼠标，同时保留清晰的退出、错误恢复和多显示器行为。
 
 ## Solution
 
-为主展示窗口增加“桌面宠物模式”和“全屏舞台模式”两种持久化呈现模式。桌面宠物保留可拖动、可缩放窗口；全屏舞台覆盖桌宠当前所在显示器的完整边界，使用透明或本地媒体作为舞台背景，并以保持比例的方式呈现数字人。
+为主展示窗口增加“桌面宠物模式”和“全屏舞台模式”两种持久化呈现模式。桌面宠物保留可拖动、可缩放窗口，并提供右键进入的可视化宽高编辑器；全屏舞台覆盖桌宠当前所在显示器的完整边界，使用透明或本地媒体作为舞台背景。人物默认保持源比例，编辑时允许用户独立拉伸宽度和高度。
 
-两种模式共用原生右键菜单。菜单提供模式切换、舞台背景管理、人物布局编辑、重新检测连接和退出应用。舞台背景支持引用原路径的 PNG、JPG/JPEG、WebP、BMP、GIF 和 MP4；所有媒体采用居中 `cover`，MP4 静音循环。舞台人物使用相对坐标和相对屏幕高度的缩放，支持带编辑框的拖动与滚轮缩放。
+两种模式共用原生右键菜单。菜单提供模式切换、舞台背景管理、桌宠窗口编辑、人物布局编辑、重新检测连接和退出应用。舞台背景支持引用原路径的 PNG、JPG/JPEG、WebP、BMP、GIF 和 MP4；所有媒体采用居中 `cover`，MP4 静音循环。舞台人物使用相对坐标以及独立的相对宽高缩放，支持带八向控制点的拖动、拉伸与滚轮等比缩放。
 
-离散设置以事务方式立即保存；桌宠边界停止变化 3 秒后保存。保存失败、媒体失效、显示器断开、连接中断和退出前补存都有明确的回退行为。桌面宠物和全屏舞台都不再显示对话字幕。
+离散设置以事务方式立即保存；普通桌宠拖动在边界停止变化 3 秒后保存，而可视化桌宠编辑仅在点击“保存”时持久化，“取消”恢复进入编辑前的窗口。保存失败、媒体失效、显示器断开、连接中断和退出前补存都有明确的回退行为。桌面宠物和全屏舞台都不再显示对话字幕。
 
 ## User Stories
 
@@ -52,12 +52,12 @@
 31. As a stage user, I want MP4 backgrounds to autoplay silently, loop, and hide player controls, so that they behave as backgrounds rather than foreground media players.
 32. As a desktop pet user, I want background media stopped and rendering resources released outside fullscreen, so that hidden stage media does not consume CPU or GPU.
 33. As a stage user, I want media playback to restart from the beginning whenever fullscreen or a temporary preview starts, so that each presentation has predictable playback.
-34. As a stage user, I want the digital human to preserve source aspect ratio, fit screen height, remain horizontally centered, and sit at the bottom by default, so that the initial composition is not distorted.
+34. As a stage user, I want the digital human to preserve source aspect ratio, fit screen height, remain horizontally centered, and sit at the bottom by default, so that the initial composition starts undistorted.
 35. As a stage user, I want to open a visual person-layout editor from the right-click menu, so that I can adjust composition without entering numeric coordinates.
-36. As a stage user, I want a visible rectangular edit frame that can be dragged and scaled with the mouse wheel, so that the editable region is unambiguous even around keyed transparent pixels.
+36. As a stage user, I want a visible rectangular edit frame with eight resize handles that can be dragged, stretched independently, or scaled with the mouse wheel, so that I can control width and height directly.
 37. As a stage user, I want wheel scaling to keep the edit-frame center fixed, so that resizing is stable and predictable.
 38. As a stage user, I want the person frame center constrained to the display while allowing partial off-screen placement, so that cropped compositions are possible without losing the person completely.
-39. As a stage user, I want effectively unrestricted scaling with a technical `1%–10000%` safety range, so that I can create extreme compositions without invalid render values.
+39. As a stage user, I want positive finite width and height scaling without a product-level upper limit, so that I can create extreme or intentionally distorted compositions.
 40. As a multi-monitor user, I want one relative person layout shared across display resolutions, so that the composition remains similar without per-display configuration.
 41. As a person-layout editor, I want only explicit Save to persist changes and Cancel to restore the prior layout, so that experimentation is reversible.
 42. As a person-layout editor, I want `Esc` and the right-click menu disabled during editing, so that Save and Cancel are the only exits.
@@ -76,6 +76,9 @@
 55. As a user, I want the right-click menu to retain Re-detect Connection, so that the existing manual recovery path remains available.
 56. As a user, I want stream failure to continue showing the existing automatic-access window and return to my saved presentation mode after recovery, so that presentation features do not rewrite connection behavior.
 57. As a fullscreen user, I want a confirmed Exit Application item in the right-click menu, so that a borderless topmost stage has a discoverable close path.
+58. As a desktop pet user, I want a right-click visual window editor with move and eight resize handles, so that a transparent frameless pet can be positioned and sized without discovering a hidden panel.
+59. As a desktop pet editor, I want preview changes to remain transient until Save and Cancel to restore the entry bounds, so that experimenting never silently overwrites my durable window state.
+60. As a stage user, I want legacy single-scale layouts migrated to equal width and height scales, so that upgrading preserves the previous composition.
 
 ## Implementation Decisions
 
@@ -83,17 +86,17 @@
 - Extend configuration normalization so it preserves existing connection fields and desktop bounds while validating the new presentation mode, background kind, media absolute path, and relative person layout. Missing or invalid new fields fall back to desktop pet mode, transparent background, and default person layout.
 - Introduce one main-process presentation coordinator as the primary state-transition seam. It owns transactional configuration changes, BrowserWindow mode application, target-display selection, high-level always-on-top state, native context-menu construction, dialogs, background file polling metadata, and exit orchestration.
 - Keep the preload bridge narrow and capability-based. The renderer receives presentation snapshots and invokes named presentation actions; it never gains unrestricted filesystem or Electron access.
-- Introduce one renderer stage-view seam that owns effective background elements, media validation feedback, aspect-preserving digital-human transforms, edit-frame interaction, temporary preview state, and subtitle suppression.
-- Keep desktop-pet bounds independent from fullscreen display bounds. Suppress bounds persistence while fullscreen or temporary preview is active. Desktop-pet move and resize use a 3-second trailing debounce, with synchronous flush before mode changes and exit.
+- Introduce one renderer stage-view seam that owns effective background elements, media validation feedback, independent digital-human width/height transforms, edit-frame interaction, temporary preview state, and subtitle suppression.
+- Keep desktop-pet bounds independent from fullscreen display bounds. Suppress bounds persistence while fullscreen, temporary preview, or visual desktop editing is active. Ordinary desktop-pet move and resize use a 3-second trailing debounce; visual desktop editing is transactional and persists only on Save.
 - Cover the complete Electron display bounds rather than work-area bounds so fullscreen includes the taskbar. Resolve the initial target from the desktop-pet window's display with the largest intersection.
 - Apply the strongest practical Electron always-on-top level to both presentation modes. Windows secure desktop, UAC, lock screen, and similar operating-system surfaces remain outside application control.
 - Disable the page drag region in fullscreen and temporary preview. Ordinary fullscreen pointer interaction is inert except for right-click context menu; edit mode enables only the edit frame and fixed Save/Cancel controls.
-- Represent stage-person position as normalized center coordinates and size as a multiplier relative to display height. Preserve source video aspect ratio, clamp the center into normalized display bounds, and apply a technical scale clamp of `0.01–100` times the default fit-height size.
+- Represent stage-person position as normalized center coordinates and size as independent positive finite width and height multipliers relative to the default fit-height frame. Legacy `scale` migrates to equal width and height multipliers. Keep the default aspect ratio, allow explicit deformation through edge/corner handles, and clamp the center into normalized display bounds.
 - Use the selected media's original absolute path. Maintain separate configured background kind and selected media path so transparent selection can retain media and missing media can auto-restore.
 - Validate newly selected media before committing configuration. Images and GIFs must decode; MP4 must reach a playable decoded state. File-picker cancellation is a no-op.
 - Render every background type with centered `cover`. MP4 is muted, looping, autoplaying, and control-free. Tear down background DOM/media resources whenever fullscreen or temporary preview ends.
 - While configured media is actively relevant, poll its existence and file metadata every 3 seconds. A missing file produces effective transparent rendering without changing configured selection. A changed or restored file replaces the current render only after successful decoding.
-- Build one native context menu for both modes. Stage controls remain enabled in desktop pet mode so users can prepare fullscreen settings. During person editing the context menu is suppressed.
+- Build one native context menu for both modes. Stage controls remain enabled in desktop pet mode so users can prepare fullscreen settings, and desktop mode adds a dedicated visual window editor. During either editor the context menu is suppressed.
 - Keep normal `Esc` handling disabled in fullscreen and edit states. Preserve `Alt+F4` as an exit entry point, but route it through the unified confirmation and final-save workflow.
 - Remove visual subtitle rendering in both modes while leaving conversation, audio, and connection message handling intact.
 - Preserve the existing automatic-access lifecycle. Main display hiding releases stage media and discards unsaved person-layout drafts; successful reconnection reapplies the durable presentation state.
@@ -105,13 +108,13 @@
 
 - Prefer observable state transitions and rendered/window behavior over private helper assertions. A good test starts from configuration plus an external action and verifies the resulting durable configuration, BrowserWindow state, menu state, renderer state, or user-visible error.
 - Use the main-process presentation coordinator as the highest and primary automated seam. Inject fake window, display, dialog, configuration storage, timer, and media-probe ports so a single suite can cover mode transactions, display migration, menus, polling, save rollback, bounds debounce, and exit flows without asserting internal call order.
-- Use the renderer stage-view public interface as the second seam for behavior that cannot be observed at the main-process coordinator: `cover` geometry, aspect-preserving person layout, edit-frame drag and scaling, Save/Cancel behavior, media teardown, hot replacement, and subtitle absence. Use DOM and media fakes rather than real codecs in routine tests.
+- Use renderer stage-view and desktop-editor public interfaces for behavior that cannot be observed at the main-process coordinator: `cover` geometry, independent person width/height, eight-way resizing, transactional desktop bounds, media teardown, hot replacement, and subtitle absence. Use DOM and media fakes rather than real codecs in routine tests.
 - Keep a small Electron/Playwright smoke seam for native integration only: complete-display bounds, high-level always-on-top, frame and transparency flags, context-menu wiring, file and confirmation dialogs, preload isolation, mode restoration, and automatic-access handoff.
 - Extend the existing pure window-bounds tests for 3-second debounce flush, disconnected-display correction, and the rule that fullscreen bounds never overwrite desktop-pet bounds.
 - Extend existing renderer and automatic-access regression tests to prove that stream discovery, candidate replacement, connection recovery, and Re-detect Connection remain unchanged.
 - Cover configuration migration from legacy JSON, invalid-field normalization, round-trip preservation of every new field, and failure to write configuration.
 - Cover background behavior for every allowed extension, decode rejection, file-picker cancellation, configured-versus-effective state, unavailable menu state, 3-second restoration, metadata hot update, failed hot update, MP4 lifecycle, and resource teardown.
-- Cover person layout defaults, normalized cross-display mapping, aspect ratio, center constraint, technical scale boundary, temporary preview mode isolation, reset confirmation, connection loss during editing, and save failure rollback.
+- Cover person layout defaults, legacy-scale migration, normalized cross-display mapping, independent width/height, center constraint, temporary preview mode isolation, both editors' Save/Cancel behavior, reset confirmation, connection loss during editing, and save failure rollback.
 - Do not make routine unit tests depend on actual monitor hardware, native codecs, real filesystem timing, or a running Python service; reserve those dependencies for bounded smoke/manual verification.
 
 ## Out of Scope

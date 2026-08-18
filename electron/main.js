@@ -3,6 +3,7 @@ const path = require('path')
 const fs = require('fs')
 const { spawn, spawnSync } = require('child_process')
 const { createPresentationController } = require('./presentation_controller')
+const { createDesktopPetEditController } = require('./desktop_pet_edit_controller')
 const { runPresentationExit } = require('./presentation_exit')
 const { createPresentationMenuTemplate } = require('./presentation_menu')
 const {
@@ -48,6 +49,7 @@ let stageMediaPollTimer = null
 let nextMediaValidationId = 1
 let lastNonModalError = ''
 let quitConfirmationInProgress = false
+let desktopPetEditController = null
 const pendingMediaValidations = new Map()
 const stageMediaTracker = createStageMediaTracker({ validate: requestMediaValidation })
 
@@ -232,6 +234,9 @@ function buildPresentationSnapshot(snapshot = presentationController?.getSnapsho
   if (!snapshot) return null
   return {
     ...snapshot,
+    ...(desktopPetEditController?.isEditing()
+      ? desktopPetEditController.getSnapshot()
+      : { editing_desktop_pet: false }),
     ...getApprovedMediaDescriptor(),
   }
 }
@@ -377,6 +382,10 @@ function flushMainWindowBoundsSave() {
     return null
   }
 
+  if (desktopPetEditController?.isEditing()) {
+    clearMainWindowBoundsSaveTimer()
+    return null
+  }
   const snapshot = presentationController?.getSnapshot()
   if (snapshot?.effective_mode === PRESENTATION_MODES.FULLSCREEN_STAGE) {
     clearMainWindowBoundsSaveTimer()
@@ -399,7 +408,8 @@ function queueMainWindowBoundsSave() {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
-  if (presentationController?.getSnapshot().effective_mode === PRESENTATION_MODES.FULLSCREEN_STAGE) {
+  if (desktopPetEditController?.isEditing() ||
+    presentationController?.getSnapshot().effective_mode === PRESENTATION_MODES.FULLSCREEN_STAGE) {
     return
   }
 
@@ -422,6 +432,13 @@ function assertMainWindowSender(event) {
 }
 
 function applyMainWindowBounds(bounds) {
+  if (desktopPetEditController?.isEditing()) {
+    return {
+      ok: false,
+      fieldErrors: {},
+      message: '请先保存或取消桌宠可视化编辑。',
+    }
+  }
   if (presentationController?.getSnapshot().effective_mode === PRESENTATION_MODES.FULLSCREEN_STAGE) {
     return {
       ok: false,
@@ -510,7 +527,8 @@ async function runDiscretePresentationAction(title, action) {
 }
 
 async function setPresentationMode(mode) {
-  if (presentationController?.getSnapshot().editing_person) return false
+  if (desktopPetEditController?.isEditing() ||
+    presentationController?.getSnapshot().editing_person) return false
   flushMainWindowBoundsSave()
   return runDiscretePresentationAction('切换呈现模式失败', async () => {
     const snapshot = await presentationController.setMode(mode)
@@ -617,7 +635,8 @@ async function resetStagePersonLayout() {
 }
 
 function beginStagePersonEditing() {
-  if (!presentationController || presentationController.getSnapshot().editing_person) return false
+  if (desktopPetEditController?.isEditing() || !presentationController ||
+    presentationController.getSnapshot().editing_person) return false
   flushMainWindowBoundsSave()
   try {
     publishPresentationState(presentationController.beginPersonEditing())
@@ -626,6 +645,50 @@ function beginStagePersonEditing() {
     showOperationError('打开人物布局编辑失败', error)
     return false
   }
+}
+
+function beginDesktopPetEditing() {
+  const snapshot = presentationController?.getSnapshot()
+  if (!snapshot || desktopPetEditController?.isEditing() || snapshot.editing_person ||
+    snapshot.effective_mode !== PRESENTATION_MODES.DESKTOP_PET) {
+    return false
+  }
+  const saveStatus = flushMainWindowBoundsSave()
+  if (saveStatus?.state === 'error') {
+    showOperationError('打开桌宠编辑失败', new Error(saveStatus.message))
+    return false
+  }
+  clearMainWindowBoundsSaveTimer()
+  pendingMainWindowBounds = null
+  desktopPetEditController.begin()
+  return true
+}
+
+function updateDesktopPetEditingBounds(bounds) {
+  if (!desktopPetEditController?.isEditing()) {
+    return { ok: false, message: '桌宠当前不在编辑状态。' }
+  }
+  try {
+    const result = desktopPetEditController.preview(bounds)
+    if (result.ok) sendToMainWindow('main-window-bounds-changed', result.bounds)
+    return result
+  } catch (error) {
+    return { ok: false, message: error?.message || '操作系统拒绝了桌宠窗口尺寸。' }
+  }
+}
+
+async function saveDesktopPetEditing() {
+  if (!desktopPetEditController?.isEditing()) return false
+  try {
+    return desktopPetEditController.save().ok
+  } catch (error) {
+    await showOperationError('保存桌宠大小和位置失败', error)
+    return false
+  }
+}
+
+function cancelDesktopPetEditing() {
+  return desktopPetEditController?.cancel() || false
 }
 
 function isConfiguredMediaAvailable() {
@@ -642,6 +705,7 @@ function buildMainWindowContextMenu() {
     setBackgroundKind: setStageBackgroundKind,
     chooseMedia: chooseStageBackgroundMedia,
     clearMedia: clearStageBackgroundMedia,
+    editDesktopPet: beginDesktopPetEditing,
     editPerson: beginStagePersonEditing,
     resetPerson: resetStagePersonLayout,
     restart: { label: '重新检测连接', click: restartAutomaticAccess },
@@ -735,9 +799,29 @@ function createMainWindow({ show = true } = {}) {
     getPrimaryDisplay: () => screen.getPrimaryDisplay(),
     getAllDisplays: () => screen.getAllDisplays(),
   })
+  desktopPetEditController = createDesktopPetEditController({
+    window: mainWindow,
+    validateBounds,
+    isVisible: (bounds) => hasMinimumVisibleArea(bounds, getDisplayWorkAreas(), MIN_VISIBLE_SIZE),
+    persist: (bounds) => writeConfig({ window_bounds: bounds }),
+    onCommit: (bounds) => {
+      pendingMainWindowBounds = null
+      presentationController.updateDesktopBounds(bounds)
+      lastNonModalError = ''
+      updateMainWindowSaveStatus({ state: 'saved' })
+    },
+    onRestore: (bounds) => {
+      clearMainWindowBoundsSaveTimer()
+      pendingMainWindowBounds = null
+      presentationController.correctDesktopBounds(bounds)
+      updateMainWindowSaveStatus({ state: 'saved' })
+      sendToMainWindow('main-window-bounds-changed', bounds)
+    },
+    onStateChange: () => publishPresentationState(),
+  })
   presentationController.applySavedMode()
   mainWindow.webContents.on('context-menu', () => {
-    if (presentationController.getSnapshot().editing_person) return
+    if (desktopPetEditController?.isEditing() || presentationController.getSnapshot().editing_person) return
     buildMainWindowContextMenu().popup({ window: mainWindow })
   })
   mainWindow.on('move', queueMainWindowBoundsSave)
@@ -755,6 +839,7 @@ function createMainWindow({ show = true } = {}) {
     clearPendingMediaValidations()
     presentationController?.dispose()
     presentationController = null
+    desktopPetEditController = null
     mainWindow = null
   })
 }
@@ -810,6 +895,7 @@ function showMainWindow() {
 function showAutoConnectWindow() {
   createSetupWindow()
   if (mainWindow && !mainWindow.isDestroyed()) {
+    if (desktopPetEditController?.isEditing()) cancelDesktopPetEditing()
     if (presentationController?.getSnapshot().editing_person) {
       presentationController.cancelPersonEditing()
     }
@@ -868,6 +954,22 @@ app.whenReady().then(() => {
   ipcMain.handle('begin-stage-person-editing', (event) => {
     assertMainWindowSender(event)
     return beginStagePersonEditing()
+  })
+  ipcMain.handle('begin-desktop-pet-editing', (event) => {
+    assertMainWindowSender(event)
+    return beginDesktopPetEditing()
+  })
+  ipcMain.handle('update-desktop-pet-bounds', (event, bounds) => {
+    assertMainWindowSender(event)
+    return updateDesktopPetEditingBounds(bounds)
+  })
+  ipcMain.handle('save-desktop-pet-editing', (event) => {
+    assertMainWindowSender(event)
+    return saveDesktopPetEditing()
+  })
+  ipcMain.handle('cancel-desktop-pet-editing', (event) => {
+    assertMainWindowSender(event)
+    return cancelDesktopPetEditing()
   })
   ipcMain.handle('save-stage-person-layout', async (event, layout) => {
     assertMainWindowSender(event)

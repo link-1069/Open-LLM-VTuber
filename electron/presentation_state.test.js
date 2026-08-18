@@ -29,7 +29,7 @@ test('presentation values round-trip while invalid values fall back safely', () 
   const valid = normalizeConfig({
     presentation_mode: 'fullscreen_stage',
     stage_background: { kind: 'media', media_path: 'D:\\media\\stage.mp4' },
-    stage_person_layout: { center_x: 0.25, center_y: 0.75, scale: 42 },
+    stage_person_layout: { center_x: 0.25, center_y: 0.75, width_scale: 2, height_scale: 0.5 },
   })
   assert.equal(valid.presentation_mode, 'fullscreen_stage')
   assert.deepEqual(valid.stage_background, {
@@ -39,13 +39,14 @@ test('presentation values round-trip while invalid values fall back safely', () 
   assert.deepEqual(valid.stage_person_layout, {
     center_x: 0.25,
     center_y: 0.75,
-    scale: 42,
+    width_scale: 2,
+    height_scale: 0.5,
   })
 
   const invalid = normalizeConfig({
     presentation_mode: 'kiosk',
     stage_background: { kind: 'video', media_path: 'relative\\stage.png' },
-    stage_person_layout: { center_x: -1, center_y: 3, scale: Infinity },
+    stage_person_layout: { center_x: -1, center_y: 3, width_scale: -1, height_scale: Infinity },
   })
   assert.equal(invalid.presentation_mode, 'desktop_pet')
   assert.deepEqual(invalid.stage_background, {
@@ -55,7 +56,8 @@ test('presentation values round-trip while invalid values fall back safely', () 
   assert.deepEqual(invalid.stage_person_layout, {
     center_x: 0.5,
     center_y: 0.5,
-    scale: 1,
+    width_scale: 1,
+    height_scale: 1,
   })
 
   const invalidMedia = normalizeConfig({
@@ -75,15 +77,26 @@ test('stage media type accepts only the configured image, GIF, and MP4 formats',
   assert.equal(getStageMediaType('C:\\media\\fake.mp4.exe'), null)
 })
 
-test('stage person frame preserves video ratio using relative position and display height', () => {
+test('stage person frame supports independent relative width and height', () => {
   assert.deepEqual(
     calculateStagePersonFrame({
       viewport_width: 1920,
       viewport_height: 1080,
       video_width: 480,
       video_height: 800,
-      layout: { center_x: 0.25, center_y: 0.75, scale: 0.5 },
+      layout: { center_x: 0.25, center_y: 0.75, width_scale: 2, height_scale: 0.5 },
     }),
-    { left: 318, top: 540, width: 324, height: 540 }
+    { left: -168, top: 540, width: 1296, height: 540 }
   )
+})
+
+test('legacy single-scale person layouts migrate without changing their shape', () => {
+  assert.deepEqual(normalizeConfig({
+    stage_person_layout: { center_x: 0.2, center_y: 0.8, scale: 3 },
+  }).stage_person_layout, {
+    center_x: 0.2,
+    center_y: 0.8,
+    width_scale: 3,
+    height_scale: 3,
+  })
 })

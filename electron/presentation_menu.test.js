@@ -17,6 +17,7 @@ function createActions() {
     setBackgroundKind() {},
     chooseMedia() {},
     clearMedia() {},
+    editDesktopPet() {},
     editPerson() {},
     resetPerson() {},
     restart: { label: '重新检测连接', click() {} },
@@ -36,6 +37,17 @@ test('menu exposes both modes and marks an unavailable expected media background
   assert.equal(mediaItem.checked, true)
   assert.equal(mediaItem.enabled, false)
   assert.equal(mediaItem.label, '使用已选媒体：stage.gif（不可用）')
+  assert.equal(template[4].label, '编辑桌宠大小和位置…')
+  assert.equal(template[4].enabled, false)
+})
+
+test('desktop pet visual editor is available only while the desktop mode is effective', () => {
+  const template = createPresentationMenuTemplate(createSnapshot({
+    effective_mode: 'desktop_pet',
+  }), true, createActions())
+
+  assert.equal(template[4].enabled, true)
+  assert.equal(template[5].label, '编辑全屏舞台人物大小和位置…')
 })
 
 test('menu actions delegate discrete choices to the coordinator callbacks', () => {

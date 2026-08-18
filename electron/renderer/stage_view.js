@@ -13,7 +13,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : window, function (layoutAPI, contractAPI) {
   'use strict'
 
-  const { calculateStagePersonFrame } = layoutAPI
+  const { calculateStagePersonFrame, resizeStagePersonLayout } = layoutAPI
   const { PRESENTATION_MODES, STAGE_BACKGROUND_KINDS } = contractAPI
 
   function createStageView(options) {
@@ -193,28 +193,45 @@
 
     function handlePointerDown(event) {
       if (!snapshot?.editing_person || !draftLayout) return
+      const resizeDirection = event.target?.dataset?.stageResize || ''
       drag = {
         pointerId: event.pointerId,
         clientX: event.clientX,
         clientY: event.clientY,
         centerX: draftLayout.center_x,
         centerY: draftLayout.center_y,
+        resizeDirection,
+        layout: { ...draftLayout },
       }
+      event.target?.setPointerCapture?.(event.pointerId)
       editFrame.setPointerCapture?.(event.pointerId)
     }
 
     function handlePointerMove(event) {
       if (!drag || event.pointerId !== drag.pointerId || !draftLayout) return
-      draftLayout.center_x = clamp(
-        drag.centerX + (event.clientX - drag.clientX) / Math.max(1, windowObject.innerWidth),
-        0,
-        1
-      )
-      draftLayout.center_y = clamp(
-        drag.centerY + (event.clientY - drag.clientY) / Math.max(1, windowObject.innerHeight),
-        0,
-        1
-      )
+      if (drag.resizeDirection) {
+        Object.assign(draftLayout, resizeStagePersonLayout({
+          viewport_width: windowObject.innerWidth,
+          viewport_height: windowObject.innerHeight,
+          video_width: getVideoDimensions().width,
+          video_height: getVideoDimensions().height,
+          layout: drag.layout,
+          direction: drag.resizeDirection,
+          delta_x: event.clientX - drag.clientX,
+          delta_y: event.clientY - drag.clientY,
+        }))
+      } else {
+        draftLayout.center_x = clamp(
+          drag.centerX + (event.clientX - drag.clientX) / Math.max(1, windowObject.innerWidth),
+          0,
+          1
+        )
+        draftLayout.center_y = clamp(
+          drag.centerY + (event.clientY - drag.clientY) / Math.max(1, windowObject.innerHeight),
+          0,
+          1
+        )
+      }
       applyPersonFrame()
     }
 
@@ -225,7 +242,15 @@
     function handleWheel(event) {
       if (!snapshot?.editing_person || !draftLayout) return
       event.preventDefault()
-      draftLayout.scale = clamp(draftLayout.scale * Math.exp(-event.deltaY * 0.001), 0.01, 100)
+      const factor = Math.exp(-event.deltaY * 0.001)
+      const nextWidthScale = draftLayout.width_scale * factor
+      const nextHeightScale = draftLayout.height_scale * factor
+      if (Number.isFinite(nextWidthScale) && nextWidthScale > 0) {
+        draftLayout.width_scale = nextWidthScale
+      }
+      if (Number.isFinite(nextHeightScale) && nextHeightScale > 0) {
+        draftLayout.height_scale = nextHeightScale
+      }
       applyPersonFrame()
     }
 
